@@ -1,0 +1,170 @@
+// TeamOS — one app: team tasks + company finance.
+//
+// Two rules the whole schema follows:
+//   1. ONE central Transaction ledger. No monthly tables, no per-section copies.
+//      Salaries and client payments WRITE INTO it, they never keep their own money.
+//   2. Status-style fields are plain strings validated in src/lib/constants.ts
+//      rather than database enums, so the schema runs unchanged on Postgres
+//      (hosted) and SQLite (if you ever want a local file database again).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Pooled connection: what the running app uses.
+  url       = env("DATABASE_URL")
+  // Direct connection: migrations need a real session, which a pooler can't give.
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  /// MANAGER = sees finance + everyone's tasks. MEMBER = own tasks only.
+  role         String    @default("MEMBER")
+  active       Boolean   @default(true)
+  phone        String?
+  designation  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  lastLoginAt  DateTime?
+
+  assignedTasks Task[]        @relation("TaskAssignee")
+  createdTasks  Task[]        @relation("TaskCreator")
+  verifiedTasks Task[]        @relation("TaskVerifier")
+  transactions  Transaction[] @relation("TransactionCreator")
+}
+
+model Task {
+  id           String    @id @default(cuid())
+  name         String
+  assigneeId   String
+  assignee     User      @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: Cascade)
+  /// Not Started | In Review | Completed | Blocked
+  status       String    @default("Not Started")
+  dueDate      DateTime
+  completedAt  DateTime?
+  /// Completed date minus due date, never below zero. Null while incomplete.
+  daysLate     Int?
+  verifiedById String?
+  verifiedBy   User?     @relation("TaskVerifier", fields: [verifiedById], references: [id], onDelete: SetNull)
+  docUrl       String?
+  notes        String?
+
+  // Recurrence: the NEXT occurrence is created only after this one completes.
+  recurring      Boolean   @default(false)
+  /// Daily | Weekly
+  frequency      String?
+  /// 0 = Sunday … 6 = Saturday (weekly only)
+  weekday        Int?
+  recurringStart DateTime?
+  recurringEnd   DateTime?
+  nextCreated    Boolean   @default(false)
+
+  createdById String
+  createdBy   User     @relation("TaskCreator", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([assigneeId])
+  @@index([status])
+  @@index([dueDate])
+}
+
+model Client {
+  id            String   @id @default(cuid())
+  name          String
+  company       String?
+  contactPerson String?
+  email         String?
+  phone         String?
+  project       String?
+  /// Contract value in paise (₹1 = 100).
+  contractValue Int?
+  paymentTerms  String?
+  /// Active | Inactive
+  status        String   @default("Active")
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  transactions Transaction[]
+}
+
+model Category {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  /// EXPENSE (spend category) or INCOME (income source, e.g. ARC3)
+  kind      String   @default("EXPENSE")
+  color     String   @default("slate")
+  archived  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  transactions Transaction[]
+}
+
+model Salary {
+  id           String    @id @default(cuid())
+  employeeName String
+  /// Monthly salary in paise.
+  amount       Int
+  /// The month this salary is for, as yyyy-MM (e.g. "2026-09").
+  month        String
+  paymentDate  DateTime?
+  /// Amount actually paid, in paise (supports Partially Paid).
+  amountPaid   Int       @default(0)
+  /// Pending | Paid | Partially Paid
+  status       String    @default("Pending")
+  notes        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  /// The expense this salary created in the ledger. One salary, one transaction.
+  transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  transactionId String?      @unique
+
+  @@index([month])
+}
+
+/// The central ledger. Every rupee in or out of the business is one row here.
+model Transaction {
+  id   String   @id @default(cuid())
+  /// Human reference shown in the UI, e.g. TX-20260920-001.
+  ref  String   @unique
+  /// INCOME | EXPENSE
+  type String
+  date DateTime
+
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  /// Payee for an expense, payer/source for income.
+  name       String
+  clientId   String?
+  client     Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  /// Crypto leg, when income arrives in USDT.
+  usdt Float?
+  rate Float?
+  /// Always the INR value in paise — the only number totals are built from.
+  amount Int
+
+  /// Received | Pending | Paid
+  status String  @default("Received")
+  notes  String?
+
+  /// Set when this row was generated by a salary, so nothing is double counted.
+  salary Salary?
+
+  createdById String
+  createdBy   User     @relation("TransactionCreator", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([date])
+  @@index([type])
+  @@index([clientId])
+}
