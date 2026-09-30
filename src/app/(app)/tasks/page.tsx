@@ -1,234 +1,242 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import { CheckSquare } from "lucide-react";
-import { requireUser } from "@/lib/auth";
-import { db } from "@/lib/db";
-import { isManager } from "@/lib/constants";
-import { computeDaysOverdue, performanceFor } from "@/lib/task-logic";
-import { toDateInput } from "@/lib/dates";
-import { cn, pct } from "@/lib/utils";
-import { Card, CardHeader, EmptyState, PageHeader, Progress } from "@/components/ui/card";
-import { Kpi } from "@/components/app/kpi";
-import { TaskList, type TaskRow } from "@/components/app/task-list";
-import { NewTaskButton, type TaskFormOptions } from "@/components/app/task-form";
-import { ExportButton } from "@/components/app/export-button";
+import { AlertTriangle, CheckSquare, Inbox } from "lucide-react";
+import { requireScope } from "@/lib/auth";
+import { tenantDb } from "@/lib/db";
+import { listTasks, myDay, taskCounts } from "@/lib/tasks";
+import { dateOnly } from "@/lib/task-rules";
+import { can, clientIdScope } from "@/lib/scope";
+import { Badge } from "@/components/ui/badge";
+import { Card, EmptyState, PageHeader } from "@/components/ui/card";
+import { NewTaskButton } from "./new-task-button";
+import { TaskFilters } from "./task-filters";
+import { TaskRow } from "./task-row";
 
 export const metadata: Metadata = { title: "Tasks" };
 
 export default async function TasksPage({ searchParams }: PageProps<"/tasks">) {
-  const user = await requireUser();
-  const { tab } = await searchParams;
-  const manager = isManager(user.role);
-  const view = tab === "performance" && manager ? "performance" : "tasks";
-
-  const [tasks, people] = await Promise.all([
-    db.task.findMany({
-      where: manager ? {} : { assigneeId: user.id },
-      include: { assignee: { select: { id: true, name: true } }, verifiedBy: { select: { name: true } } },
-      orderBy: [{ dueDate: "asc" }, { createdAt: "desc" }],
-    }),
-    db.user.findMany({ where: { active: true }, select: { id: true, name: true, role: true }, orderBy: { name: "asc" } }),
-  ]);
-
-  const options: TaskFormOptions = {
-    assignees: people.map((p) => ({ id: p.id, name: p.name })),
-    verifiers: people.filter((p) => isManager(p.role)).map((p) => ({ id: p.id, name: p.name })),
-    canManage: manager,
-    today: toDateInput(new Date()),
+  const { user, scope } = await requireScope();
+  const params = await searchParams;
+  const one = (key: string) => {
+    const v = params[key];
+    return typeof v === "string" && v ? v : undefined;
   };
 
-  const rows: TaskRow[] = tasks.map((t) => ({
-    id: t.id,
-    name: t.name,
-    assigneeId: t.assigneeId,
-    assigneeName: t.assignee.name,
-    status: t.status,
-    dueDate: t.dueDate.toISOString(),
-    completedAt: t.completedAt?.toISOString() ?? null,
-    daysLate: t.daysLate,
-    verifiedById: t.verifiedById,
-    verifiedByName: t.verifiedBy?.name ?? null,
-    docUrl: t.docUrl,
-    notes: t.notes,
-    recurring: t.recurring,
-    frequency: t.frequency,
-    weekday: t.weekday,
-    recurringStart: t.recurringStart?.toISOString() ?? null,
-    recurringEnd: t.recurringEnd?.toISOString() ?? null,
-  }));
+  const view = one("view") ?? "day";
+  const timeZone = user.timezone;
 
-  const stats = {
-    total: tasks.length,
-    notStarted: tasks.filter((t) => t.status === "Not Started").length,
-    inReview: tasks.filter((t) => t.status === "In Review").length,
-    completed: tasks.filter((t) => t.status === "Completed").length,
-    overdue: tasks.filter((t) => computeDaysOverdue(t.dueDate, t.status) > 0).length,
+  const db = tenantDb(user.tenantId);
+  const [people, clients, brands, counts] = await Promise.all([
+    db.user.findMany({ where: { status: "Active" }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    db.client.findMany({
+      where: { ...clientIdScope(scope), deletedAt: null },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    }),
+    db.brand.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    taskCounts(scope, timeZone),
+  ]);
+
+  // What every row needs. The date is already a string by the time it gets
+  // there, so the timezone does not travel with it.
+  const shared = {
+    currentUserId: user.id,
+    canEdit: can(scope, "task:edit"),
+    canVerify: can(scope, "task:verify"),
   };
 
   return (
     <>
       <PageHeader
         title="Tasks"
-        description={manager ? "Everything the team is working on." : "Your tasks."}
-        actions={
-          <>
-            <ExportButton type="tasks" />
-            {manager && <NewTaskButton options={options} />}
-          </>
+        description={
+          view === "day"
+            ? "What is on you, in the order it should be dealt with. Overdue first — a list that puts today above last week lets things rot."
+            : "Everything the workspace is carrying. A task with no client is internal work and everybody can see it."
         }
+        actions={can(scope, "task:create") && <NewTaskButton people={people} clients={clients} brands={brands} />}
       />
 
-      {manager && (
-        <div className="mb-5 flex gap-1 border-b border-border">
-          {[
-            { id: "tasks", label: "Tasks", href: "/tasks" },
-            { id: "performance", label: "Team Performance", href: "/tasks?tab=performance" },
-          ].map((t) => (
-            <Link
-              key={t.id}
-              href={t.href}
-              className={cn(
-                "-mb-px border-b-2 px-3 pb-2.5 text-sm font-medium transition",
-                view === t.id ? "border-brand text-brand" : "border-transparent text-muted hover:text-fg",
-              )}
-            >
-              {t.label}
-            </Link>
-          ))}
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div className="flex gap-1.5 rounded-lg border border-border bg-surface-2 p-1">
+          <ViewTab href="/tasks?view=day" label="My day" active={view === "day"} count={counts.mine} />
+          <ViewTab href="/tasks?view=all" label="Everything" active={view === "all"} count={counts.open} />
         </div>
-      )}
 
-      {view === "tasks" ? (
-        <>
-          <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-5">
-            <Kpi label="Total tasks" value={stats.total} />
-            <Kpi label="Not started" value={stats.notStarted} />
-            <Kpi label="In review" value={stats.inReview} tone="orange" />
-            <Kpi label="Completed" value={stats.completed} tone="green" />
-            <Kpi label="Overdue" value={stats.overdue} tone={stats.overdue ? "red" : "neutral"} />
-          </div>
+        {counts.overdue > 0 && (
+          <span className="flex items-center gap-1.5 text-sm text-[var(--red)]">
+            <AlertTriangle className="size-4" />
+            {counts.overdue} overdue
+          </span>
+        )}
+      </div>
 
-          <Card className="overflow-hidden">
-            <CardHeader
-              title="Task list"
-              description="Completing a recurring task automatically creates its next scheduled occurrence."
-            />
-            {rows.length === 0 ? (
-              <EmptyState
-                icon={<CheckSquare />}
-                title="No tasks yet"
-                description={manager ? "Create the first task to get started." : "Nothing assigned to you right now."}
-                action={manager ? <NewTaskButton options={options} /> : undefined}
-              />
-            ) : (
-              <TaskList tasks={rows} options={options} />
-            )}
-          </Card>
-        </>
+      {view === "day" ? (
+        <MyDay scope={scope} shared={shared} timeZone={timeZone} />
       ) : (
-        <TeamPerformance tasks={tasks} people={people} />
+        <Everything
+          scope={scope}
+          shared={shared}
+          timeZone={timeZone}
+          clients={clients}
+          people={people}
+          filters={{
+            status: one("status"),
+            assigneeId: one("assignee"),
+            clientId: one("client"),
+            priority: one("priority"),
+            q: one("q"),
+            overdueOnly: one("overdue") === "1",
+            openOnly: !one("status"),
+          }}
+        />
       )}
     </>
   );
 }
 
-type TaskWithAssignee = {
-  assigneeId: string;
-  status: string;
-  dueDate: Date;
-  completedAt: Date | null;
-  daysLate: number | null;
+function ViewTab({ href, label, active, count }: { href: string; label: string; active: boolean; count: number }) {
+  return (
+    <a
+      href={href}
+      className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors ${
+        active ? "bg-surface text-fg shadow-card" : "text-muted hover:text-fg"
+      }`}
+    >
+      {label}
+      <span className={active ? "text-muted" : "text-subtle"}>{count}</span>
+    </a>
+  );
+}
+
+type Shared = {
+  currentUserId: string;
+  canEdit: boolean;
+  canVerify: boolean;
 };
 
-function TeamPerformance({
-  tasks,
-  people,
+async function MyDay({
+  scope,
+  shared,
+  timeZone,
 }: {
-  tasks: TaskWithAssignee[];
-  people: { id: string; name: string; role: string }[];
+  scope: Parameters<typeof myDay>[0];
+  shared: Shared;
+  timeZone: string;
 }) {
-  const rows = people
-    .map((person) => ({ person, ...performanceFor(tasks.filter((t) => t.assigneeId === person.id)) }))
-    .filter((r) => r.assigned > 0);
+  const day = await myDay(scope, timeZone);
+  const nothing = day.overdue.length + day.dueToday.length + day.upcoming.length + day.waiting.length === 0;
 
-  if (!rows.length) {
+  if (nothing) {
     return (
       <Card>
-        <EmptyState title="No tasks assigned yet" description="Performance appears once the team has tasks." />
+        <EmptyState
+          icon={<CheckSquare />}
+          title="Nothing on you"
+          description="No open tasks assigned to you this week. Either you are ahead, or nobody has given you anything."
+        />
       </Card>
     );
   }
 
   return (
-    <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {rows.map(({ person, ...p }) => (
-          <Card key={person.id} className="p-4">
-            <div className="flex items-baseline justify-between gap-3">
-              <p className="font-semibold">{person.name}</p>
-              <p className="tabular text-sm text-muted">
-                {p.completed} / {p.assigned}
-              </p>
-            </div>
-            <p className="tabular mt-3 text-2xl font-semibold text-brand">{p.onTimePct}%</p>
-            <p className="text-xs text-muted">on time</p>
-            <Progress value={p.completionPct} className="mt-3" />
-            <p className="mt-1.5 text-xs text-muted">{p.completionPct}% of tasks completed</p>
-            <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5 border-t border-border pt-3 text-[13px]">
-              <Stat label="Late" value={p.late} tone={p.late ? "text-[var(--red)]" : undefined} />
-              <Stat label="Overdue" value={p.overdue} tone={p.overdue ? "text-[var(--red)]" : undefined} />
-              <Stat label="In review" value={p.inReview} />
-              <Stat label="Blocked" value={p.blocked} tone={p.blocked ? "text-[var(--red)]" : undefined} />
-            </dl>
-            {p.avgDaysLate > 0 && <p className="mt-2 text-xs text-muted">Average {p.avgDaysLate} days late when late</p>}
-          </Card>
-        ))}
-      </div>
-
-      <Card className="overflow-hidden">
-        <CardHeader title="Team comparison" description="Descriptive numbers — no scores, no ranking." />
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-sm">
-            <thead>
-              <tr className="border-b border-border text-left text-xs text-muted">
-                <th className="px-4 py-2.5 font-medium">Member</th>
-                <th className="px-3 py-2.5 text-right font-medium">Assigned</th>
-                <th className="px-3 py-2.5 text-right font-medium">Completed</th>
-                <th className="px-3 py-2.5 text-right font-medium">In review</th>
-                <th className="px-3 py-2.5 text-right font-medium">Blocked</th>
-                <th className="px-3 py-2.5 text-right font-medium">Late</th>
-                <th className="px-3 py-2.5 text-right font-medium">Overdue</th>
-                <th className="px-3 py-2.5 text-right font-medium">On-time</th>
-                <th className="px-4 py-2.5 text-right font-medium">Completion</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {rows.map(({ person, ...p }) => (
-                <tr key={person.id} className="hover:bg-surface-2/60">
-                  <td className="px-4 py-2.5 font-medium">{person.name}</td>
-                  <td className="tabular px-3 py-2.5 text-right">{p.assigned}</td>
-                  <td className="tabular px-3 py-2.5 text-right">{p.completed}</td>
-                  <td className="tabular px-3 py-2.5 text-right">{p.inReview}</td>
-                  <td className="tabular px-3 py-2.5 text-right">{p.blocked}</td>
-                  <td className={cn("tabular px-3 py-2.5 text-right", p.late && "text-[var(--red)]")}>{p.late}</td>
-                  <td className={cn("tabular px-3 py-2.5 text-right", p.overdue && "text-[var(--red)]")}>{p.overdue}</td>
-                  <td className="tabular px-3 py-2.5 text-right">{p.onTimePct}%</td>
-                  <td className="tabular px-4 py-2.5 text-right">{pct(p.completed, p.assigned)}%</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+    <div className="grid gap-4">
+      <Section title="Overdue" tone="red" tasks={day.overdue} shared={shared} timeZone={timeZone} />
+      <Section title={`Due today · ${day.today}`} tone="blue" tasks={day.dueToday} shared={shared} timeZone={timeZone} />
+      <Section title="This week" tone="grey" tasks={day.upcoming} shared={shared} timeZone={timeZone} />
+      <Section title="Waiting on your review" tone="orange" tasks={day.waiting} shared={shared} timeZone={timeZone} />
     </div>
   );
 }
 
-function Stat({ label, value, tone }: { label: string; value: number; tone?: string }) {
+async function Everything({
+  scope,
+  shared,
+  timeZone,
+  clients,
+  people,
+  filters,
+}: {
+  scope: Parameters<typeof listTasks>[0];
+  shared: Shared;
+  timeZone: string;
+  clients: { id: string; name: string }[];
+  people: { id: string; name: string }[];
+  filters: Parameters<typeof listTasks>[1];
+}) {
+  const tasks = await listTasks(scope, filters, timeZone);
+
   return (
-    <div className="flex items-center justify-between gap-2">
-      <dt className="text-muted">{label}</dt>
-      <dd className={cn("tabular font-medium", tone)}>{value}</dd>
-    </div>
+    <>
+      <TaskFilters clients={clients} people={people} />
+
+      {tasks.length === 0 ? (
+        <Card className="mt-4">
+          <EmptyState icon={<Inbox />} title="Nothing matches" description="Try clearing the filters." />
+        </Card>
+      ) : (
+        <Card className="mt-4 overflow-hidden">
+          <div className="divide-y divide-border">
+            {tasks.map((task) => (
+              <TaskRow key={task.id} task={serialise(task, timeZone)} {...shared} />
+            ))}
+          </div>
+        </Card>
+      )}
+    </>
   );
+}
+
+function Section({
+  title,
+  tone,
+  tasks,
+  shared,
+  timeZone,
+}: {
+  title: string;
+  tone: "red" | "blue" | "grey" | "orange";
+  tasks: Awaited<ReturnType<typeof listTasks>>;
+  shared: Shared;
+  timeZone: string;
+}) {
+  if (tasks.length === 0) return null;
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
+        <h2 className="text-sm font-semibold">{title}</h2>
+        <Badge tone={tone}>{tasks.length}</Badge>
+      </div>
+      <div className="divide-y divide-border">
+        {tasks.map((task) => (
+          <TaskRow key={task.id} task={serialise(task, timeZone)} {...shared} />
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+/** Dates and counts flattened for the client component. */
+function serialise(task: Awaited<ReturnType<typeof listTasks>>[number], timeZone: string) {
+  return {
+    id: task.id,
+    name: task.name,
+    status: task.status,
+    priority: task.priority,
+    dueDate: dateOnly(task.dueDate, timeZone),
+    assigneeId: task.assigneeId,
+    assigneeName: task.assignee.name,
+    assignedById: task.assignedById,
+    clientName: task.client?.name ?? null,
+    brandName: task.brand?.name ?? null,
+    relationshipLabel: task.relationship ? `${task.relationship.person.name} · ${task.relationship.context.name}` : null,
+    category: task.category,
+    estimatedMinutes: task.estimatedMinutes,
+    actualMinutes: task.actualMinutes,
+    daysLate: task.daysLate,
+    isPrivate: task.isPrivate,
+    recurring: task.recurring,
+    frequency: task.frequency,
+    verifiedByName: task.verifiedBy?.name ?? null,
+  };
 }
