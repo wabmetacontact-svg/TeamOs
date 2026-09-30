@@ -75,6 +75,7 @@ export default async function TransactionPage({ params }: PageProps<"/ledger/[id
               <Badge tone={transaction.paymentStatus === "Overdue" ? "red" : "orange"}>{transaction.paymentStatus}</Badge>
             )}
             {closed && <Badge tone="grey">Month closed</Badge>}
+            {transaction.approvalInferred && <Badge tone="grey">Approval inferred</Badge>}
             <span className={`text-base font-semibold ${income ? "text-emerald-600" : ""}`}>
               {income ? "+" : "−"}
               {formatMoney(transaction.amountBase, user.baseCurrency).replace("−", "")}
@@ -187,7 +188,18 @@ export default async function TransactionPage({ params }: PageProps<"/ledger/[id
               <Row label="Client" value={transaction.client.name} />
               <Row label="Book month" value={formatBookMonth(transaction.bookMonth)} />
               <Row label="Entered by" value={transaction.createdBy.name} />
-              {transaction.approvedBy && <Row label="Decided by" value={transaction.approvedBy.name} />}
+              {transaction.approvedBy && (
+                <Row
+                  label={transaction.approvalInferred ? "Imported by" : "Decided by"}
+                  value={transaction.approvedBy.name}
+                />
+              )}
+              {transaction.approvalInferred && (
+                <p className="mt-1 rounded-lg border border-border bg-surface-2 px-3 py-2 text-xs text-muted">
+                  This arrived already approved, from a sheet imported during cutover. Nobody reviewed it here — the
+                  approval is inferred from its having been in the books, not a decision anybody made.
+                </p>
+              )}
               {transaction.approvedAt && (
                 <Row
                   label="Decided"

@@ -70,6 +70,7 @@ model Tenant {
   sessions          Session[]
   scopeGrants       UserClientScope[]
   contextGrants     UserContextScope[]
+  reconciliations   Reconciliation[]
   recurringSpends   RecurringSpend[]
 
   @@map("tenants")
@@ -181,6 +182,8 @@ model User {
   createdTransactions  Transaction[]             @relation("TransactionCreatedBy")
   approvedTransactions Transaction[]             @relation("TransactionApprovedBy")
   closedMonths         BookMonth[]               @relation("BookMonthClosedBy")
+  reconciliationsRecorded Reconciliation[]       @relation("ReconciliationRecordedBy")
+  reconciliationsResolved Reconciliation[]       @relation("ReconciliationResolvedBy")
   uploads              Attachment[]
 
   @@unique([tenantId, email])
@@ -343,6 +346,7 @@ model Client {
   scopeGrants     UserClientScope[]
   transactions    Transaction[]
   bookMonths      BookMonth[]
+  reconciliations Reconciliation[]
   tasks           Task[]
   relationships   Relationship[]
   recurringSpends RecurringSpend[]
@@ -580,6 +584,47 @@ model BookMonth {
 
 /// The ledger. Income and expenses in one table, separated by direction, so a
 /// month's net position is one query rather than two tables reconciled by hand.
+/// What a source sheet said a client-month came to, so the platform's own
+/// figure can be checked against it.
+///
+/// Cutover is the one time these two numbers are produced independently, and
+/// the only honest way to know an import worked is to compare them. Kept as
+/// rows rather than a one-off script because reconciling a year takes several
+/// sittings, and a difference somebody investigated and explained is worth
+/// more than one they recomputed from scratch each time.
+model Reconciliation {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  /// yyyy-MM
+  month    String
+
+  /// What the sheet says, in minor units. Entered by hand from the source.
+  expectedIncome BigInt
+  expectedSpend  BigInt
+  /// Where the figure came from: a filename, a tab, a person.
+  source         String?
+
+  /// Set when somebody has looked at the difference and accounted for it.
+  /// A reconciliation is not finished because the numbers match; it is
+  /// finished because somebody says so.
+  resolvedAt   DateTime?
+  resolvedById String?
+  resolvedBy   User?     @relation("ReconciliationResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+  note         String?
+
+  recordedById String
+  recordedBy   User     @relation("ReconciliationRecordedBy", fields: [recordedById], references: [id])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([clientId, month])
+  @@index([tenantId, month])
+  @@map("reconciliations")
+}
+
 model Transaction {
   id        String @id @default(cuid())
   tenantId  String

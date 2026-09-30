@@ -269,6 +269,28 @@ Audit search UI, notification queue with retry and per-user channel preferences,
 
 **Gate.** Every mutation from stages 1–5 appears in the audit log with actor, before and after — verified by replaying the test suite and asserting the log's row count and content. A failing notification provider does not block the action that triggered it.
 
+**Stage 7 — the harness is built; the cutover itself is yours to run.**
+
+| Done | |
+|---|---|
+| Reconciliation | `lib/reconciliation.ts` + `/ledger/reconcile` — record what each sheet says a client-month came to, see the difference against the ledger to the paisa, settle it with a note |
+| Unplaceable rows | The import preview downloads every row it cannot place, with the reason beside each, as a CSV to fix at the source and re-import |
+| Inferred approvals | `approvalInferred` now shows wherever a row appears — list, detail, export — and the reconcile page counts them. Before this it existed only as a column in the export |
+| Progress | Months recorded, settled, differing, and — the one that matters — months with data that nobody has compared against anything |
+| Gate | **16 reconciliation tests**, plus `scope-spread.test.ts` |
+
+| The plan asked for | Proved by |
+|---|---|
+| Totals per client per month match the source exactly | `reconciliation.test.ts` — to the paisa, with a test that one paisa out is a mismatch |
+| Historical expenses import as Approved, flagged inferred | the flag survives, still counts toward the total, and is distinguishable from a real approval |
+| One month in parallel before the sheets go read-only | **Not testable — a process.** Somebody runs both for a month. |
+
+**Three design decisions.** The sheet figure is typed in by hand, deliberately: a number extracted by the same code that did the import would agree with itself and prove nothing. A month short by exactly the value of its unapproved rows is labelled as that, not as a mismatch, because it is a month somebody has not finished approving. And a month is settled when somebody says so, not when the numbers match — two identical mistakes agree with each other, and a difference that was investigated and explained is the normal outcome, not a failure.
+
+**The spread bug, a fifth time.** `rowsBehind` was written as `{ ...clientIdScope(scope), id: clientId }` — the exact line that broke `clientWhere` and then `pipelineSummary`, each time followed by a comment explaining it. Comments did not stop it. `tests/scope-spread.test.ts` now reads the source and fails on any object literal that spreads an id-scope helper beside an `id`; its first run flagged the comment above the fix for this bug, so it strips comments first.
+
+**Two things that nearly cost the database.** Adding the reconciliation table, `prisma migrate dev` twice offered only one remedy — reset — for two different reasons. The interim app's init migration had been deleted from the directory while its row remained in `_prisma_migrations`; it is restored with a README saying why it stays. And `core.autocrlf` had rewritten migration files from LF to CRLF on a branch switch, invalidating three checksums nobody had touched. `.gitattributes` now pins migration SQL to LF, and `npm run db:fix-checksums` re-records a checksum when only the bytes changed — reporting by default, writing only with `--apply`.
+
 ### Stage 7 — Migration and cutover
 Import scripts, the unplaceable-row report, reconciliation, parallel running.
 

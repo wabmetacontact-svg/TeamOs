@@ -330,6 +330,24 @@ export function ImportWizard({
               </table>
             </div>
 
+            {bad.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-800">
+                <span>
+                  {bad.length} {bad.length === 1 ? "row" : "rows"} cannot be placed. Download them with the reason beside
+                  each, fix them in the sheet, and import that file on its own.
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  className="ml-auto"
+                  onClick={() => downloadUnplaceable(bad, filename)}
+                >
+                  Download {bad.length} unplaceable
+                </Button>
+              </div>
+            )}
+
             {preview.rows.length > shown.length && (
               <Button variant="ghost" size="sm" className="justify-self-start" onClick={() => setShowAll(true)}>
                 Show all {preview.rows.length} rows
@@ -384,4 +402,45 @@ export function ImportWizard({
       )}
     </div>
   );
+}
+
+/**
+ * The rows the preview could not place, with the reason on each, as a CSV.
+ *
+ * The unplaceable-row report the cutover plan asks for. A list on screen is
+ * read once and lost; a file goes back to whoever keeps the sheet, gets fixed
+ * there, and comes back as its own import — which keeps the fix at the source
+ * rather than patched in here where the next export would lose it.
+ */
+function downloadUnplaceable(rows: PreviewRow[], source: string) {
+  const cell = (value: string) => {
+    const guarded = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+    return /[",\r\n]/.test(guarded) ? `"${guarded.replace(/"/g, '""')}"` : guarded;
+  };
+
+  const header = ["Line", "Problem", "Date", "Name", "Client", "Category", "Direction", "Amount", "Currency", "Book month"];
+  const body = rows.map((r) =>
+    [
+      String(r.line),
+      r.problems.join("; "),
+      r.date,
+      r.name,
+      r.clientName,
+      r.categoryName,
+      r.direction,
+      r.amount,
+      r.currency,
+      r.bookMonth,
+    ]
+      .map(cell)
+      .join(","),
+  );
+
+  const csv = "\ufeff" + [header.join(","), ...body].join("\r\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `unplaceable-${(source || "import").replace(/\.csv$/i, "")}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }

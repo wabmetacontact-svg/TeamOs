@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowDownLeft, ArrowUpRight, CalendarCheck, Download, Inbox, Receipt, Repeat, Upload } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, CalendarCheck, Download, Inbox, Receipt, Repeat, Scale, Upload } from "lucide-react";
 import { requireScope } from "@/lib/auth";
 import { tenantDb } from "@/lib/db";
 import { bookMonthOf, formatBookMonth, formatMoney, isBookMonth, nextBookMonth, previousBookMonth } from "@/lib/money";
@@ -74,6 +74,14 @@ export default async function LedgerPage({ searchParams }: PageProps<"/ledger">)
                 <Link href="/ledger/months">
                   <CalendarCheck />
                   Months
+                </Link>
+              </Button>
+            )}
+            {can(scope, "expense:view") && (
+              <Button variant="secondary" asChild>
+                <Link href="/ledger/reconcile">
+                  <Scale />
+                  Reconcile
                 </Link>
               </Button>
             )}
@@ -179,6 +187,7 @@ export default async function LedgerPage({ searchParams }: PageProps<"/ledger">)
                     amountOriginal: t.amountOriginal.toString(),
                     currencyOriginal: t.currencyOriginal,
                     approvalState: t.approvalState,
+                    approvalInferred: t.approvalInferred,
                     paymentStatus: t.paymentStatus,
                     attachments: t._count.attachments,
                     createdBy: t.createdBy.name,

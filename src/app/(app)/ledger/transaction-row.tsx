@@ -22,6 +22,8 @@ type Transaction = {
   amountOriginal: string;
   currencyOriginal: string;
   approvalState: string;
+  /** Imported already approved from a sheet; nobody approved it here. */
+  approvalInferred?: boolean;
   paymentStatus: string;
   attachments: number;
   createdBy: string;
@@ -93,6 +95,13 @@ export function TransactionRow({
             <Badge tone={transaction.paymentStatus === "Overdue" ? "red" : "orange"}>{transaction.paymentStatus}</Badge>
           )}
           <Badge tone={stateTone(transaction.approvalState)}>{transaction.approvalState}</Badge>
+          {/* Without this, a row that arrived settled from a spreadsheet reads
+              exactly like one a person looked at and approved. */}
+          {transaction.approvalInferred && (
+            <Badge tone="grey" >
+              <span title="Imported already approved. Nobody approved it here.">inferred</span>
+            </Badge>
+          )}
         </div>
 
         {canApprove && transaction.approvalState === "Submitted" && (

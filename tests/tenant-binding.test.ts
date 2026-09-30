@@ -35,7 +35,7 @@ const TENANT_MODELS = [
   "context", "pipelineStage", "relationship", "relationshipStageChange", "activity",
   "category", "vendor", "bookMonth", "transaction", "attachment", "recurringSpend",
   "task", "taskStatusChange", "auditEntry", "notification", "role", "rolePermission",
-  "userClientScope", "userContextScope",
+  "userClientScope", "userContextScope", "reconciliation",
 ];
 
 /**
