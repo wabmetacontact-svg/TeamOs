@@ -22,7 +22,10 @@
 //     rather than generated in advance. The task IS the rule.
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  // One SQL statement per query instead of one per level of include. See the
+  // note on getScope in src/lib/auth.ts for the measurement behind it.
+  previewFeatures = ["relationJoins"]
 }
 
 datasource db {

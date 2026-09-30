@@ -190,6 +190,19 @@ export type CurrentUser = {
  * Cached for the duration of one request, recomputed on the next — which is
  * what makes a role change or a revocation take effect immediately rather than
  * at the next login.
+ *
+ * This runs on every click, so its cost is the floor under every page. By
+ * default Prisma resolves each level of an include with its own statement:
+ * session, tenant, user, role, role permissions, permissions, client scope,
+ * context scope — eight SELECTs, run one after another inside the tenant
+ * transaction, each paying a full round trip. Measured from India to the
+ * database in Singapore that was eleven statements and ~870 ms before a page
+ * did any work of its own.
+ *
+ * The `relationJoins` preview feature in schema.prisma turns it into one
+ * statement with lateral joins: four round trips instead of eleven, ~340 ms.
+ * It is on for the whole client, so every include in the application got the
+ * same fix without a line of it changing.
  */
 export const getScope = cache(async (): Promise<{ user: CurrentUser; scope: Scope } | null> => {
   const claims = await verifySession((await cookies()).get(SESSION_COOKIE)?.value);

@@ -96,6 +96,20 @@ git push -u origin main
 
 The build runs `prisma migrate deploy` for you, so the tables are created automatically. Every `git push` from now on redeploys.
 
+### The region matters more than anything else about speed
+
+`vercel.json` pins the app's server functions to **`sin1` — Singapore**, the same region as the Neon database. Do not remove it.
+
+Every database query here costs about four round trips, because each one sets the tenant inside a transaction before it runs. That is what makes tenant isolation hold in the database rather than in code somebody might forget — and it means the distance between the server and the database is multiplied by four on every query.
+
+| Server runs in | Round trip to Singapore | One query | One click |
+|---|---|---|---|
+| Singapore (`sin1`) | ~1–3 ms | ~10 ms | fast |
+| A laptop in India | ~80 ms | ~315 ms | noticeable |
+| Vercel's default, US East | ~220 ms | ~900 ms | several seconds |
+
+Without `vercel.json`, Vercel picks US East, and production would be roughly three times *slower* than running it locally from India. If you ever move the database, move the region with it — check with **Project → Settings → Functions → Region**.
+
 ## 5. Add your team
 
 Open the Vercel link, sign in with the account from step 2, then **Settings → Team → Add member** for each person: name, email, role, and a temporary password to share with them.
