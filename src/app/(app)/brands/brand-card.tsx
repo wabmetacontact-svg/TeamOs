@@ -1,15 +1,15 @@
 "use client";
 
-import { BRAND_COLORS } from "@/lib/ui-enums";
-
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import { AlertCircle, Check, Settings2, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import { Field, Input, Select } from "@/components/ui/input";
+import { Field, Input } from "@/components/ui/input";
+import { brandHex } from "@/lib/brand-colors";
 import { deleteBrand, fieldUsage, renameBrand, updateBrandFields } from "./actions";
+import { ColorPicker } from "./color-picker";
 import { FieldEditor, type EditableField, type FieldType } from "./field-editor";
 
 type Brand = {
@@ -52,7 +52,7 @@ export function BrandCard({ brand, canEdit }: { brand: Brand; canEdit: boolean }
     setSaved(null);
     start(async () => {
       if (name !== brand.name || color !== brand.color) {
-        const renamed = await renameBrand({ id: brand.id, name, color: color as (typeof BRAND_COLORS)[number] });
+        const renamed = await renameBrand({ id: brand.id, name, color });
         if (!renamed.ok) {
           setError(renamed.error);
           return;
@@ -87,7 +87,7 @@ export function BrandCard({ brand, canEdit }: { brand: Brand; canEdit: boolean }
       <CardHeader
         title={
           <span className="flex items-center gap-2">
-            <span className={`size-2.5 rounded-full ${dot(brand.color)}`} aria-hidden />
+            <span className="size-2.5 rounded-full" style={{ backgroundColor: brandHex(brand.color) }} aria-hidden />
             {brand.name}
           </span>
         }
@@ -148,18 +148,12 @@ export function BrandCard({ brand, canEdit }: { brand: Brand; canEdit: boolean }
           )
         ) : (
           <>
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <div className="grid gap-4">
               <Field label="Name" htmlFor={`name-${brand.id}`} required>
                 <Input id={`name-${brand.id}`} value={name} onChange={(e) => setName(e.currentTarget.value)} />
               </Field>
               <Field label="Colour" htmlFor={`color-${brand.id}`}>
-                <Select id={`color-${brand.id}`} value={color} onChange={(e) => setColor(e.currentTarget.value)}>
-                  {BRAND_COLORS.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </Select>
+                <ColorPicker id={`color-${brand.id}`} value={color} onChange={setColor} />
               </Field>
             </div>
 
@@ -219,17 +213,4 @@ function toEditable(defs: Brand["fieldDefs"]): EditableField[] {
     help: def.help,
     existing: true,
   }));
-}
-
-function dot(color: string): string {
-  return (
-    {
-      blue: "bg-blue-500",
-      green: "bg-emerald-500",
-      orange: "bg-orange-500",
-      red: "bg-rose-500",
-      purple: "bg-violet-500",
-      slate: "bg-slate-400",
-    }[color] ?? "bg-slate-400"
-  );
 }

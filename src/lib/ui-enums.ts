@@ -19,10 +19,10 @@
  * offending module was `server-only` rather than `"use server"`.
  */
 
-export const BRAND_COLORS = ["blue", "green", "orange", "red", "purple", "slate"] as const;
+// Brand colours used to live here as six fixed names. They are any colour now
+// — see lib/brand-colors.ts, which keeps reading the old names.
 export const CLIENT_STATUSES = ["Onboarding", "Active", "Paused", "Archived"] as const;
 export const ACTIVITY_TYPES = ["Call", "Meeting", "Message", "Note"] as const;
 
-export type BrandColor = (typeof BRAND_COLORS)[number];
 export type ClientStatus = (typeof CLIENT_STATUSES)[number];
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];

@@ -1,23 +1,33 @@
 "use client";
 
-import { BRAND_COLORS } from "@/lib/ui-enums";
-
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { AlertCircle, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
-import { Field, Input, Select } from "@/components/ui/input";
+import { Field, Input } from "@/components/ui/input";
+import { DEFAULT_BRAND_COLOR } from "@/lib/brand-colors";
 import { createBrand } from "./actions";
+import { ColorPicker } from "./color-picker";
 
 export function NewBrandButton() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [color, setColor] = useState<string>(DEFAULT_BRAND_COLOR);
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) {
+          setError(null);
+          setColor(DEFAULT_BRAND_COLOR);
+        }
+      }}
+    >
       <DialogTrigger asChild>
         <Button variant="primary">
           <Plus />
@@ -33,12 +43,10 @@ export function NewBrandButton() {
           action={(formData) =>
             start(async () => {
               setError(null);
-              const result = await createBrand({
-                name: String(formData.get("name") ?? ""),
-                color: String(formData.get("color") ?? "blue") as (typeof BRAND_COLORS)[number],
-              });
+              const result = await createBrand({ name: String(formData.get("name") ?? ""), color });
               if (result.ok) {
                 setOpen(false);
+                setColor(DEFAULT_BRAND_COLOR);
                 router.refresh();
               } else setError(result.error);
             })
@@ -56,14 +64,12 @@ export function NewBrandButton() {
             <Input id="brand-name" name="name" placeholder="ARC3" required autoFocus />
           </Field>
 
-          <Field label="Colour" htmlFor="brand-color" hint="Used wherever the brand is shown beside a client">
-            <Select id="brand-color" name="color" defaultValue="blue">
-              {BRAND_COLORS.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </Select>
+          <Field
+            label="Colour"
+            htmlFor="brand-color"
+            hint="Pick a preset, or any colour — paste the hex from the brand's style guide"
+          >
+            <ColorPicker id="brand-color" value={color} onChange={setColor} />
           </Field>
 
           <Button type="submit" variant="primary" loading={pending} className="mt-1 justify-self-start">

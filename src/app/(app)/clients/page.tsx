@@ -4,6 +4,7 @@ import { Building2, Download } from "lucide-react";
 import { requireScope } from "@/lib/auth";
 import { tenantDb } from "@/lib/db";
 import { brandSubTags, listClients } from "@/lib/clients";
+import { brandHex } from "@/lib/brand-colors";
 import { can } from "@/lib/scope";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -108,6 +109,11 @@ export default async function ClientsPage({ searchParams }: PageProps<"/clients"
                     {client.subTag && <span className="truncate text-xs text-subtle">· {client.subTag}</span>}
                   </div>
                   <p className="truncate text-xs text-muted">
+                    <span
+                      className="mr-1 inline-block size-2 rounded-full align-middle"
+                      style={{ backgroundColor: brandHex(client.brand.color) }}
+                      aria-hidden
+                    />
                     {client.brand.name} · {client.billingCurrency}
                     {client._count.contacts > 0 && ` · ${client._count.contacts} contact${client._count.contacts === 1 ? "" : "s"}`}
                     {client._count.transactions > 0 && ` · ${client._count.transactions} entries`}

@@ -2,17 +2,30 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { BRAND_COLORS } from "@/lib/ui-enums";
+import { DEFAULT_BRAND_COLOR, normalizeBrandColor } from "@/lib/brand-colors";
 import { defineAction, UserError, type ActionResult } from "@/lib/action";
 import { fieldDefsSchema, readFieldDefs } from "@/lib/custom-fields";
 import { NotFoundError } from "@/lib/scope";
 
-
 const nameField = z.string().trim().min(1, "A brand needs a name").max(60);
+
+/**
+ * Any colour, stored as lowercase #rrggbb. Validated here rather than trusted
+ * from the picker: the value ends up in an inline style, and a string that is
+ * not a colour has no business reaching one.
+ */
+const colorField = z
+  .string()
+  .trim()
+  .transform((value, ctx) => {
+    const hex = normalizeBrandColor(value);
+    if (!hex) ctx.addIssue({ code: "custom", message: "Use a hex colour like #2563eb" });
+    return hex ?? DEFAULT_BRAND_COLOR;
+  });
 
 export const createBrand = defineAction({
   permission: "settings:edit",
-  input: z.object({ name: nameField, color: z.enum(BRAND_COLORS).default("blue") }),
+  input: z.object({ name: nameField, color: colorField.default(DEFAULT_BRAND_COLOR) }),
   async handler(ctx, input) {
     if (await ctx.db.brand.findFirst({ where: { name: { equals: input.name, mode: "insensitive" } } })) {
       throw new UserError(`${input.name} already exists.`);
@@ -27,7 +40,7 @@ export const createBrand = defineAction({
       resourceType: "Brand",
       resourceId: brand.id,
       resourceLabel: brand.name,
-      after: { name: brand.name },
+      after: { name: brand.name, color: brand.color },
     });
 
     revalidatePath("/brands");
@@ -38,7 +51,7 @@ export const createBrand = defineAction({
 
 export const renameBrand = defineAction({
   permission: "settings:edit",
-  input: z.object({ id: z.string().min(1), name: nameField, color: z.enum(BRAND_COLORS) }),
+  input: z.object({ id: z.string().min(1), name: nameField, color: colorField }),
   async handler(ctx, input) {
     const brand = await ctx.db.brand.findUnique({ where: { id: input.id } });
     if (!brand) throw new NotFoundError();
