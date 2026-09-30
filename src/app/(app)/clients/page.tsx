@@ -1,140 +1,134 @@
 import type { Metadata } from "next";
-import { Users } from "lucide-react";
-import { requireManagerPage } from "@/lib/auth";
-import { db } from "@/lib/db";
-import { clientFinancials } from "@/lib/ledger";
-import { fmtDate, toDateInput } from "@/lib/dates";
-import { formatMoney } from "@/lib/money";
+import Link from "next/link";
+import { Building2, Download } from "lucide-react";
+import { requireScope } from "@/lib/auth";
+import { tenantDb } from "@/lib/db";
+import { brandSubTags, listClients } from "@/lib/clients";
+import { can } from "@/lib/scope";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardBody, EmptyState, PageHeader, Progress } from "@/components/ui/card";
-import { Kpi } from "@/components/app/kpi";
-import { AddClientButton, EditClientButton, RecordPaymentDialog } from "@/components/app/client-form";
+import { Button } from "@/components/ui/button";
+import { Card, EmptyState, PageHeader } from "@/components/ui/card";
+import { ClientFilters } from "./client-filters";
+import { NewClientButton } from "./new-client-button";
 
 export const metadata: Metadata = { title: "Clients" };
 
-export default async function ClientsPage() {
-  await requireManagerPage();
-  const clients = await db.client.findMany({ orderBy: [{ status: "asc" }, { name: "asc" }] });
-  const withMoney = await Promise.all(clients.map(async (c) => ({ client: c, money: await clientFinancials(c.id) })));
+export default async function ClientsPage({ searchParams }: PageProps<"/clients">) {
+  const { user, scope } = await requireScope();
+  const params = await searchParams;
 
-  const totalReceived = withMoney.reduce((s, r) => s + r.money.received, 0);
-  const totalPending = withMoney.reduce((s, r) => s + r.money.pending, 0);
-  const activeList = clients.filter((c) => c.status === "Active").map((c) => ({ id: c.id, name: c.name }));
+  const one = (key: string) => {
+    const v = params[key];
+    return typeof v === "string" && v ? v : undefined;
+  };
+
+  const filters = {
+    q: one("q"),
+    brandId: one("brand"),
+    status: one("status"),
+    includeArchived: one("archived") === "1",
+  };
+
+  const db = tenantDb(user.tenantId);
+  const [clients, brands, subTags] = await Promise.all([
+    listClients(scope, filters),
+    db.brand.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, color: true, fieldDefs: true } }),
+    brandSubTags(scope),
+  ]);
+
+  const query = new URLSearchParams(
+    Object.entries({ q: filters.q, brand: filters.brandId, status: filters.status, archived: filters.includeArchived ? "1" : "" })
+      .filter(([, v]) => v)
+      .map(([k, v]) => [k, String(v)]),
+  ).toString();
+
+  const filtered = Boolean(filters.q || filters.brandId || filters.status);
 
   return (
     <>
       <PageHeader
         title="Clients"
-        description="Who pays you, how much has arrived, and what is still outstanding."
+        description={
+          scope.allClients
+            ? "Everyone this workspace does work for, grouped by the brand that owns the relationship."
+            : `The ${scope.clientIds.length} ${scope.clientIds.length === 1 ? "client" : "clients"} you are assigned to. Ask an Admin if something is missing.`
+        }
         actions={
           <>
-            {activeList.length > 0 && <RecordPaymentDialog clients={activeList} today={toDateInput(new Date())} />}
-            <AddClientButton />
+            {clients.length > 0 && (
+              <Button variant="secondary" asChild>
+                <a href={`/api/clients/export${query ? `?${query}` : ""}`}>
+                  <Download />
+                  Export
+                </a>
+              </Button>
+            )}
+            {can(scope, "client:create") && <NewClientButton brands={brands} subTags={subTags} />}
           </>
         }
       />
 
+      <ClientFilters brands={brands} />
+
       {clients.length === 0 ? (
-        <Card>
+        <Card className="mt-4">
           <EmptyState
-            icon={<Users />}
-            title="No clients yet"
-            description="Add a client to track what they owe and what they have paid."
-            action={<AddClientButton />}
+            icon={<Building2 />}
+            title={filtered ? "Nothing matches that" : "No clients yet"}
+            description={
+              filtered
+                ? "Try a shorter search, or clear the filters."
+                : scope.allClients
+                  ? "Add the first one and the rest of the application has something to hang off."
+                  : "You have not been assigned to any client yet."
+            }
           />
         </Card>
       ) : (
-        <>
-          <div className="mb-4 grid grid-cols-3 gap-3">
-            <Kpi label="Clients" value={clients.length} sub={`${activeList.length} active`} />
-            <Kpi label="Total received" value={formatMoney(totalReceived)} tone="green" />
-            <Kpi label="Outstanding" value={formatMoney(totalPending)} tone={totalPending ? "orange" : "neutral"} />
+        <Card className="mt-4 overflow-hidden">
+          <div className="divide-y divide-border">
+            {clients.map((client) => (
+              <Link
+                key={client.id}
+                href={`/clients/${client.id}`}
+                className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-3 transition-colors hover:bg-surface-hover"
+              >
+                <span
+                  className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand-soft text-[11px] font-semibold text-brand"
+                  aria-hidden
+                >
+                  {client.name.slice(0, 2).toUpperCase()}
+                </span>
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className={`truncate text-sm font-medium ${client.status === "Archived" ? "text-muted" : ""}`}>
+                      {client.name}
+                    </span>
+                    {client.subTag && <span className="truncate text-xs text-subtle">· {client.subTag}</span>}
+                  </div>
+                  <p className="truncate text-xs text-muted">
+                    {client.brand.name} · {client.billingCurrency}
+                    {client._count.contacts > 0 && ` · ${client._count.contacts} contact${client._count.contacts === 1 ? "" : "s"}`}
+                    {client._count.transactions > 0 && ` · ${client._count.transactions} entries`}
+                  </p>
+                </div>
+
+                <Badge tone={statusTone(client.status)}>{client.status}</Badge>
+              </Link>
+            ))}
           </div>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            {withMoney.map(({ client, money }) => {
-              const contract = client.contractValue ?? 0;
-              const progress = contract ? Math.min(Math.round((money.received / contract) * 100), 100) : 0;
-              return (
-                <Card key={client.id}>
-                  <CardBody>
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h2 className="truncate font-semibold">{client.name}</h2>
-                          <Badge tone={client.status === "Active" ? "green" : "grey"}>{client.status}</Badge>
-                        </div>
-                        <p className="mt-0.5 truncate text-sm text-muted">
-                          {[client.company, client.project, client.paymentTerms].filter(Boolean).join(" · ") || "—"}
-                        </p>
-                      </div>
-                      <EditClientButton
-                        client={{
-                          id: client.id,
-                          name: client.name,
-                          company: client.company,
-                          contactPerson: client.contactPerson,
-                          email: client.email,
-                          phone: client.phone,
-                          project: client.project,
-                          contractValue: client.contractValue,
-                          paymentTerms: client.paymentTerms,
-                          status: client.status,
-                          notes: client.notes,
-                        }}
-                      />
-                    </div>
-
-                    <dl className="mt-4 grid grid-cols-3 gap-3 border-t border-border pt-3.5">
-                      <Money label="Contract" value={contract ? formatMoney(contract) : "—"} />
-                      <Money label="Received" value={formatMoney(money.received)} className="text-[var(--green)]" />
-                      <Money
-                        label="Outstanding"
-                        value={formatMoney(contract ? Math.max(contract - money.received, 0) : money.pending)}
-                        className={contract - money.received > 0 || money.pending > 0 ? "text-[var(--orange)]" : undefined}
-                      />
-                    </dl>
-
-                    {contract > 0 && (
-                      <div className="mt-3">
-                        <Progress value={progress} barClassName="bg-[var(--green)]" />
-                        <p className="mt-1.5 text-xs text-muted">{progress}% of the contract collected</p>
-                      </div>
-                    )}
-
-                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
-                      <span>
-                        {money.lastPaymentDate
-                          ? `Last payment ${formatMoney(money.lastPaymentAmount)} on ${fmtDate(money.lastPaymentDate, "d MMM yyyy")}`
-                          : "No payments yet"}
-                      </span>
-                      {client.status === "Active" && (
-                        <RecordPaymentDialog
-                          clients={activeList}
-                          defaultClientId={client.id}
-                          today={toDateInput(new Date())}
-                          trigger={
-                            <button className="font-medium text-brand hover:underline">Record payment</button>
-                          }
-                        />
-                      )}
-                    </div>
-                  </CardBody>
-                </Card>
-              );
-            })}
-          </div>
-        </>
+        </Card>
       )}
+
+      <p className="mt-3 text-xs text-muted">
+        {clients.length} shown{filters.includeArchived ? ", archived included" : ""}. Archiving hides a client without
+        touching anything attached to it; deleting is refused while anything is.
+      </p>
     </>
   );
 }
 
-function Money({ label, value, className }: { label: string; value: string; className?: string }) {
-  return (
-    <div>
-      <dt className="text-xs text-muted">{label}</dt>
-      <dd className={`tabular mt-0.5 font-semibold ${className ?? ""}`}>{value}</dd>
-    </div>
-  );
+function statusTone(status: string) {
+  return status === "Active" ? "green" : status === "Paused" ? "orange" : status === "Archived" ? "grey" : "blue";
 }
