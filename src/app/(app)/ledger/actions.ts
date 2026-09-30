@@ -7,6 +7,7 @@ import { bookMonthOf, convert, isBookMonth, parseAmount } from "@/lib/money";
 import { getTransaction, isMonthClosed, nextRef } from "@/lib/transactions";
 import { assertClientInScope, can, NotFoundError } from "@/lib/scope";
 import { notify } from "@/lib/notifications";
+import { holdersOf } from "@/lib/permissions";
 
 /**
  * Writing to the ledger.
@@ -276,7 +277,7 @@ export const submitTransaction = defineAction({
     // Whoever can approve is now blocking this person. Queued, never awaited
     // for its outcome — see lib/notifications.ts.
     const approvers = await ctx.db.user.findMany({
-      where: { status: "Active", role: { permissions: { some: { permission: { key: "expense:approve" } } } } },
+      where: { status: "Active", ...holdersOf("expense:approve") },
       select: { id: true },
     });
 

@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { MailPlus } from "lucide-react";
 import { requireScope } from "@/lib/auth";
 import { tenantDb } from "@/lib/db";
-import { can } from "@/lib/scope";
+import { effectivePermissions, PICKABLE_PERMISSIONS } from "@/lib/permissions";
+import { can, clientIdScope } from "@/lib/scope";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, Card, CardBody, CardHeader, EmptyState, PageHeader } from "@/components/ui/card";
 import { InviteButton } from "./invite-button";
@@ -18,13 +19,13 @@ export default async function PeoplePage() {
   const mayInvite = can(scope, "user:invite");
 
   const mayEditAccess = can(scope, "user:edit");
+  const mayAssign = can(scope, "user:assign_role");
 
-  const [people, invitations, roles, clients, contexts] = await Promise.all([
+  const [people, invitations, roles, clients, rolePermissions, invitableClients] = await Promise.all([
     db.user.findMany({
       include: {
         role: { select: { id: true, name: true } },
         scope: { select: { clientId: true } },
-        contextScope: { select: { contextId: true } },
         _count: { select: { scope: true } },
       },
       orderBy: [{ status: "asc" }, { name: "asc" }],
@@ -32,11 +33,17 @@ export default async function PeoplePage() {
     mayInvite
       ? db.invitation.findMany({
           where: { acceptedAt: null },
-          include: { role: { select: { name: true } }, invitedBy: { select: { name: true } } },
+          include: {
+            role: { select: { name: true } },
+            invitedBy: { select: { name: true } },
+          },
           orderBy: { createdAt: "desc" },
         })
       : Promise.resolve([]),
-    db.role.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, description: true } }),
+    db.role.findMany({
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, description: true },
+    }),
     mayEditAccess
       ? db.client.findMany({
           where: { deletedAt: null },
@@ -44,12 +51,45 @@ export default async function PeoplePage() {
           orderBy: { name: "asc" },
         })
       : Promise.resolve([]),
-    mayEditAccess
-      ? db.context.findMany({ select: { id: true, name: true }, orderBy: { position: "asc" } })
+    // What each role grants, so the invite and access dialogs can start from it.
+    mayInvite || mayAssign
+      ? db.rolePermission.findMany({
+          select: { roleId: true, permission: { select: { key: true } } },
+        })
+      : Promise.resolve([]),
+    // Only the clients the inviter can see: nobody hands out reach they lack.
+    mayInvite
+      ? db.client.findMany({
+          where: {
+            AND: [clientIdScope(scope), { deletedAt: null, status: { not: "Archived" } }],
+          },
+          select: { id: true, name: true, brand: { select: { name: true } } },
+          orderBy: { name: "asc" },
+        })
       : Promise.resolve([]),
   ]);
 
+  const permissionsByRole = new Map<string, string[]>();
+  for (const row of rolePermissions) {
+    permissionsByRole.set(row.roleId, [...(permissionsByRole.get(row.roleId) ?? []), row.permission.key]);
+  }
+
   const active = people.filter((p) => p.status === "Active").length;
+  const granterKeys = [...scope.permissions];
+
+  // What each person can do, as the checkboxes show it: the role, then their
+  // own changes on top.
+  function features(person: (typeof people)[number]) {
+    const roleKeys = permissionsByRole.get(person.role.id) ?? [];
+    const effective = effectivePermissions(
+      person.role.name,
+      roleKeys,
+      person.permissionsGranted,
+      person.permissionsRevoked,
+    );
+    const customised = [...PICKABLE_PERMISSIONS].filter((key) => effective.has(key) !== roleKeys.includes(key)).length;
+    return { roleKeys, permissions: [...effective], customised };
+  }
 
   return (
     <>
@@ -58,7 +98,23 @@ export default async function PeoplePage() {
         description={`${active} active ${active === 1 ? "person" : "people"}${
           people.length > active ? `, ${people.length - active} deactivated` : ""
         }. A role decides what someone can do; their client list decides what they can do it to.`}
-        actions={mayInvite ? <InviteButton roles={roles} /> : undefined}
+        actions={
+          mayInvite ? (
+            <InviteButton
+              roles={roles.map((r) => ({
+                ...r,
+                permissions: permissionsByRole.get(r.id) ?? [],
+              }))}
+              clients={invitableClients.map((c) => ({
+                id: c.id,
+                name: c.name,
+                brand: c.brand.name,
+              }))}
+              canGrantAllClients={scope.allClients}
+              granterPermissions={granterKeys}
+            />
+          ) : undefined
+        }
       />
 
       {invitations.length > 0 && (
@@ -101,9 +157,15 @@ export default async function PeoplePage() {
                 canAssignRole={can(scope, "user:assign_role")}
                 canDeactivate={can(scope, "user:deactivate")}
                 canEditAccess={mayEditAccess}
+                // A feature somebody else already gave them is theirs to keep,
+                // even if the person looking cannot hand it out themselves.
+                grantable={[...new Set([...granterKeys, ...person.permissionsGranted])]}
                 roles={roles}
-                clients={clients.map((c) => ({ id: c.id, name: c.name, hint: c.brand.name }))}
-                contexts={contexts}
+                clients={clients.map((c) => ({
+                  id: c.id,
+                  name: c.name,
+                  hint: c.brand.name,
+                }))}
                 person={{
                   id: person.id,
                   name: person.name,
@@ -114,8 +176,7 @@ export default async function PeoplePage() {
                   allClients: person.allClients,
                   clientCount: person._count.scope,
                   clientIds: person.scope.map((g) => g.clientId),
-                  allContexts: person.allContexts,
-                  contextIds: person.contextScope.map((g) => g.contextId),
+                  ...features(person),
                   lastLoginAt: person.lastLoginAt?.toISOString() ?? null,
                 }}
               />

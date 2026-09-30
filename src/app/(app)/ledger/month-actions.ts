@@ -6,6 +6,7 @@ import { defineAction, UserError, type ActionResult } from "@/lib/action";
 import { isBookMonth } from "@/lib/money";
 import { assertClientInScope } from "@/lib/scope";
 import { notify } from "@/lib/notifications";
+import { holdersOf } from "@/lib/permissions";
 
 /**
  * Closing and reopening a book month.
@@ -142,7 +143,7 @@ export const reopenBookMonth = defineAction({
     // Anybody who can close a month has probably quoted a figure from this
     // one. They should hear that it can move again.
     const closers = await ctx.db.user.findMany({
-      where: { status: "Active", role: { permissions: { some: { permission: { key: "book_month:close" } } } } },
+      where: { status: "Active", ...holdersOf("book_month:close") },
       select: { id: true },
     });
 

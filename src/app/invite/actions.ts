@@ -67,6 +67,8 @@ export async function acceptInvitation(_: ActionResult | null, formData: FormDat
           passwordHash,
           roleId: invite.roleId,
           allClients: invite.allClients,
+          permissionsGranted: invite.permissionsGranted,
+          permissionsRevoked: invite.permissionsRevoked,
           lastLoginAt: new Date(),
         },
       });

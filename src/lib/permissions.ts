@@ -40,6 +40,114 @@ export function permissionLabel(key: string): string {
 }
 
 /**
+ * The catalogue as the screens name things, for showing what a role grants.
+ *
+ * `user:invite, expense:approve` means nothing to the person choosing a role
+ * for a new hire. "Team: invite · Ledger: approve" does. Relationships are
+ * left out because the Pipelines screens were removed; the permission still
+ * exists so the data behind it stays governed.
+ */
+export const MODULES: { resource: Resource; label: string; actions: Partial<Record<string, string>> }[] = [
+  { resource: "client", label: "Clients", actions: { view: "see", create: "add", edit: "edit", archive: "archive", delete: "delete" } },
+  { resource: "expense", label: "Ledger", actions: { view: "see", create: "add", edit: "edit", delete: "delete", approve: "approve", export: "export" } },
+  { resource: "book_month", label: "Month close", actions: { close: "close", reopen: "reopen" } },
+  { resource: "task", label: "Tasks", actions: { view: "see", create: "assign", edit: "edit", delete: "delete", verify: "verify" } },
+  { resource: "person", label: "Directory", actions: { view: "see", create: "add", edit: "edit", delete: "delete" } },
+  { resource: "dashboard", label: "Dashboard", actions: { view_own: "own work", view_scoped: "their clients", view_all: "everything" } },
+  { resource: "user", label: "Team", actions: { view: "see", invite: "invite", edit: "change access", deactivate: "deactivate", assign_role: "change roles" } },
+  { resource: "role", label: "Roles", actions: { view: "see", create: "create", edit: "edit", delete: "delete" } },
+  { resource: "settings", label: "Brands & settings", actions: { view: "see", edit: "edit" } },
+  { resource: "audit", label: "Audit log", actions: { view: "see" } },
+];
+
+/** What a set of permission keys amounts to, module by module. */
+export function summarizePermissions(keys: Iterable<string>) {
+  const held = new Set(keys);
+  return MODULES.map((module) => {
+    const granted = Object.entries(module.actions)
+      .filter(([action]) => held.has(`${module.resource}:${action}`))
+      .map(([, label]) => label!);
+    return { resource: module.resource, label: module.label, granted };
+  });
+}
+
+// ────────────────────────────────────────────── per-person feature access ───
+
+/** Every key the per-person picker can change. Relationship keys are not offered. */
+export const PICKABLE_PERMISSIONS: ReadonlySet<string> = new Set(
+  MODULES.flatMap((m) => Object.keys(m.actions).map((action) => `${m.resource}:${action}`)),
+);
+
+/**
+ * What one person can actually do: their role, plus what was granted to them,
+ * minus what was taken away. An Owner is always exactly their role — the
+ * workspace must keep someone nobody can narrow.
+ */
+export function effectivePermissions(
+  roleName: string,
+  roleKeys: Iterable<string>,
+  granted: readonly string[] = [],
+  revoked: readonly string[] = [],
+): Set<string> {
+  const keys = new Set(roleKeys);
+  if (roleName === PROTECTED_ROLE) return keys;
+  for (const key of granted) keys.add(key);
+  for (const key of revoked) keys.delete(key);
+  return keys;
+}
+
+/**
+ * A `user` where-clause for "everyone who can do this", the same arithmetic as
+ * effectivePermissions done in the database: held through the role or granted
+ * personally, and not taken away — unless they are an Owner, whom nothing
+ * narrows.
+ */
+export function holdersOf(key: PermissionKey) {
+  return {
+    AND: [
+      {
+        OR: [
+          { role: { permissions: { some: { permission: { key } } } } },
+          { permissionsGranted: { has: key } },
+        ],
+      },
+      { OR: [{ NOT: { permissionsRevoked: { has: key } } }, { role: { name: PROTECTED_ROLE } }] },
+    ],
+  };
+}
+
+/**
+ * Turns the set somebody ticked into what is stored: the difference from the
+ * role. Keys the picker does not offer keep whatever the role says.
+ *
+ * `escalations` is every key granted beyond the role that the person granting
+ * does not hold themselves. It must be empty for the change to be allowed —
+ * otherwise anyone who can invite could mint an account more powerful than
+ * their own and sign in as it.
+ */
+export function permissionOverrides(input: {
+  roleName: string;
+  roleKeys: Iterable<string>;
+  chosen: Iterable<string>;
+  granterKeys: ReadonlySet<string>;
+}): { granted: string[]; revoked: string[]; escalations: string[]; unknown: string[] } {
+  const role = new Set(input.roleKeys);
+  const chosen = new Set(input.chosen);
+  // Keys that exist but are not offered are ignored; keys that do not exist
+  // at all are reported, because the form that sent them is out of date.
+  const known = new Set<string>(ALL_PERMISSIONS);
+  const unknown = [...chosen].filter((key) => !known.has(key));
+
+  if (input.roleName === PROTECTED_ROLE) return { granted: [], revoked: [], escalations: [], unknown };
+
+  const granted = [...chosen].filter((key) => PICKABLE_PERMISSIONS.has(key) && !role.has(key)).sort();
+  const revoked = [...role].filter((key) => PICKABLE_PERMISSIONS.has(key) && !chosen.has(key)).sort();
+  const escalations = granted.filter((key) => !input.granterKeys.has(key));
+
+  return { granted, revoked, escalations, unknown };
+}
+
+/**
  * The five roles that ship as defaults. Seed data, not hardcoded logic: an
  * admin can edit any of them or add their own. What cannot change is the
  * catalogue above and the rules in §"Rules that hold regardless" of the PRD.

@@ -241,14 +241,16 @@ export async function unreadCount(scope: Scope): Promise<number> {
 }
 
 export async function listNotifications(scope: Scope, take = 50, client?: Db) {
-  const db = client ?? tenantDb(scope.tenantId);
-  return db.notification.findMany({
+  const args = {
     // A person's own notifications only. There is no "see everyone's" view,
     // because there is no reason for one.
     where: { userId: scope.userId, channel: "in_app" },
-    orderBy: { createdAt: "desc" },
+    orderBy: { createdAt: "desc" as const },
     take,
-  });
+  };
+  // Two calls rather than one on `client ?? tenantDb(...)`: Prisma's overloads
+  // do not survive being unioned, and TypeScript gives up comparing them.
+  return client ? client.notification.findMany(args) : tenantDb(scope.tenantId).notification.findMany(args);
 }
 
 export async function markRead(scope: Scope, ids?: string[]): Promise<number> {

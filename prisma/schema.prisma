@@ -151,6 +151,11 @@ model User {
   /// sensitive than the KOL pipeline, so context is scoped separately from
   /// client rather than being inferred from it.
   allContexts      Boolean   @default(true)
+  /// Feature access beyond the role, and taken away from it. Only the
+  /// difference is stored, so edits to the role still reach everything that
+  /// was not changed by hand. Ignored for an Owner.
+  permissionsGranted String[] @default([])
+  permissionsRevoked String[] @default([])
   /// Base32, written when setup begins and only trusted once confirmed.
   twoFactorSecret  String?
   twoFactorEnabled Boolean   @default(false)
@@ -242,6 +247,9 @@ model Invitation {
   allClients  Boolean   @default(false)
   /// Client IDs granted on acceptance.
   clientIds   String[]  @default([])
+  /// Copied onto the user on acceptance; see User.permissionsGranted.
+  permissionsGranted String[] @default([])
+  permissionsRevoked String[] @default([])
   tokenHash   String    @unique
   invitedById String
   invitedBy   User      @relation("InvitedBy", fields: [invitedById], references: [id])

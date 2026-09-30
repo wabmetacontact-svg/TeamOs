@@ -18,8 +18,10 @@ type Person = {
   allClients: boolean;
   clientCount: number;
   clientIds: string[];
-  allContexts: boolean;
-  contextIds: string[];
+  roleKeys: string[];
+  permissions: string[];
+  /** How many features differ from their role. */
+  customised: number;
   lastLoginAt: string | null;
 };
 
@@ -30,8 +32,8 @@ export function PersonRow({
   canAssignRole,
   canDeactivate,
   canEditAccess,
+  grantable,
   clients,
-  contexts,
 }: {
   person: Person;
   roles: { id: string; name: string }[];
@@ -39,8 +41,9 @@ export function PersonRow({
   canAssignRole: boolean;
   canDeactivate: boolean;
   canEditAccess: boolean;
+  /** Keys the viewer may turn on for somebody. */
+  grantable: string[];
   clients: { id: string; name: string; hint?: string }[];
-  contexts: { id: string; name: string }[];
 }) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -57,7 +60,10 @@ export function PersonRow({
   function toggleStatus() {
     setError(null);
     start(async () => {
-      const result = await setUserStatus({ userId: person.id, status: deactivated ? "Active" : "Deactivated" });
+      const result = await setUserStatus({
+        userId: person.id,
+        status: deactivated ? "Active" : "Deactivated",
+      });
       if (!result.ok) setError(result.error);
     });
   }
@@ -72,10 +78,14 @@ export function PersonRow({
             <span className={`truncate text-sm font-medium ${deactivated ? "text-muted" : ""}`}>{person.name}</span>
             {isSelf && <Badge tone="blue">You</Badge>}
             {deactivated && <Badge tone="grey">Deactivated</Badge>}
+            {person.customised > 0 && (
+              <Badge tone="orange">
+                {person.customised} custom {person.customised === 1 ? "feature" : "features"}
+              </Badge>
+            )}
           </div>
           <p className="truncate text-xs text-muted">
             {person.email} · {person.allClients ? "all clients" : `${person.clientCount} assigned`} ·{" "}
-            {person.allContexts ? "all pipelines" : `${person.contextIds.length} pipelines`} ·{" "}
             {person.lastLoginAt
               ? `last in ${new Date(person.lastLoginAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`
               : "never signed in"}
@@ -100,7 +110,7 @@ export function PersonRow({
           <Badge tone={deactivated ? "grey" : "blue"}>{person.roleName}</Badge>
         )}
 
-        {canEditAccess && (
+        {(canEditAccess || (canAssignRole && !isSelf)) && (
           <AccessDialog
             user={{
               id: person.id,
@@ -108,11 +118,13 @@ export function PersonRow({
               roleName: person.roleName,
               allClients: person.allClients,
               clientIds: person.clientIds,
-              allContexts: person.allContexts,
-              contextIds: person.contextIds,
+              roleKeys: person.roleKeys,
+              permissions: person.permissions,
             }}
             clients={clients}
-            contexts={contexts}
+            canEditClients={canEditAccess}
+            canEditFeatures={canAssignRole && !isSelf}
+            grantable={grantable}
           />
         )}
 

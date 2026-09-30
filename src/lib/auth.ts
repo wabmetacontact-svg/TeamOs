@@ -6,6 +6,7 @@ import { hash as argonHash, verify as argonVerify } from "@node-rs/argon2";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "node:crypto";
 import { db, tenantDb } from "./db";
+import { effectivePermissions } from "./permissions";
 import type { Scope } from "./scope";
 import { twoFactorRequiredFor } from "./totp";
 import { SESSION_COOKIE, SESSION_TTL_SECONDS, signSession, verifySession } from "./session";
@@ -244,7 +245,12 @@ export const getScope = cache(async (): Promise<{ user: CurrentUser; scope: Scop
       userId: user.id,
       tenantId: tenant.id,
       roleName: user.role.name,
-      permissions: new Set(user.role.permissions.map((rp) => rp.permission.key)),
+      permissions: effectivePermissions(
+        user.role.name,
+        user.role.permissions.map((rp) => rp.permission.key),
+        user.permissionsGranted,
+        user.permissionsRevoked,
+      ),
       allClients: user.allClients,
       clientIds: user.scope.map((s) => s.clientId),
       allContexts: user.allContexts,

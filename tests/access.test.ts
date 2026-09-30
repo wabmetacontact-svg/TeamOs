@@ -9,7 +9,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { tenantDb } from "../src/lib/db";
-import { ALL_PERMISSIONS, DEFAULT_ROLES } from "../src/lib/permissions";
+import { ALL_PERMISSIONS, DEFAULT_ROLES, effectivePermissions } from "../src/lib/permissions";
 import {
   assertClientInScope,
   can,
@@ -47,7 +47,12 @@ async function scopeFor(userId: string): Promise<Scope> {
     userId: user.id,
     tenantId,
     roleName: user.role.name,
-    permissions: new Set(user.role.permissions.map((p) => p.permission.key)),
+    permissions: effectivePermissions(
+      user.role.name,
+      user.role.permissions.map((p) => p.permission.key),
+      user.permissionsGranted,
+      user.permissionsRevoked,
+    ),
     allClients: user.allClients,
     clientIds: user.scope.map((s) => s.clientId),
     allContexts: user.allContexts,

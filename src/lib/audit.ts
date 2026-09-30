@@ -24,7 +24,7 @@ export const AUDIT_ACTIONS = [
   "submitted", "approved", "rejected", "completed", "verified", "imported",
   "closed", "reopened", "stage_changed", "status_changed", "reassigned", "merged",
   "invited", "invitation_accepted", "invitation_revoked", "role_changed", "access_changed",
-  "access_granted", "access_revoked", "deactivated", "reactivated",
+  "permissions_changed", "access_granted", "access_revoked", "deactivated", "reactivated",
   "logged_in", "password_reset", "two_factor_enabled", "two_factor_disabled",
   "recovery_code_used", "recovery_codes_regenerated", "sessions_revoked",
   "workspace_created", "fields_updated", "stages_updated", "contact_added", "contact_removed",

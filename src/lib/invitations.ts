@@ -48,6 +48,8 @@ export type PendingInvite = {
   roleName: string;
   allClients: boolean;
   clientIds: string[];
+  permissionsGranted: string[];
+  permissionsRevoked: string[];
   expiresAt: Date;
   invitedByName: string;
 };
@@ -105,6 +107,8 @@ export async function lookupInvite(
       roleName: row.role.name,
       allClients: row.allClients,
       clientIds: row.clientIds,
+      permissionsGranted: row.permissionsGranted,
+      permissionsRevoked: row.permissionsRevoked,
       expiresAt: row.expiresAt,
       invitedByName: row.invitedBy.name,
     },
