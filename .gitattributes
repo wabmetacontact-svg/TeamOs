@@ -1,0 +1,22 @@
+# Migration SQL is checksummed.
+#
+# Prisma stores a SHA-256 of each migration's bytes in `_prisma_migrations`.
+# With core.autocrlf on — the default on Windows — git rewrites LF to CRLF on
+# checkout, which changes those bytes and invalidates every hash. The next
+# `migrate dev` then reports drift it cannot reconcile and offers one remedy:
+# reset the database.
+#
+# It happened here on a branch switch. Three migrations nobody had touched
+# drifted at once, which is a confusing way to learn that a version control
+# setting can threaten a production database.
+#
+# Pinned to LF so the bytes on disk are the bytes that were hashed, on every
+# machine.
+prisma/migrations/**/*.sql text eol=lf
+
+# The same for the schema, so a diff is about the schema rather than about
+# line endings.
+prisma/schema.prisma text eol=lf
+
+# Lockfiles are large and generated; a whole-file CRLF diff is noise.
+package-lock.json -text

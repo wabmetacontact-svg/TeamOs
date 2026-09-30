@@ -21,7 +21,8 @@
     "db:demo": "tsx scripts/demo-data.ts",
     "db:clean-demo": "tsx scripts/clean-demo.ts",
     "db:check-login": "tsx scripts/check-login.ts",
-    "db:set-password": "tsx scripts/set-password.ts"
+    "db:set-password": "tsx scripts/set-password.ts",
+    "db:fix-checksums": "tsx scripts/fix-migration-checksums.ts"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.1",
