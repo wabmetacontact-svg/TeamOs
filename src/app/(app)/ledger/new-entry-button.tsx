@@ -85,7 +85,7 @@ export function NewEntryButton({
                 type="checkbox"
                 checked={again}
                 onChange={(e) => setAgain(e.currentTarget.checked)}
-                className="size-4 accent-[var(--brand)]"
+                className="size-4 accent-brand"
               />
               Add another after this
             </label>

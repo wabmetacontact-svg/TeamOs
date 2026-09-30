@@ -86,7 +86,7 @@ export function ClientFilters({ brands }: { brands: { id: string; name: string }
           type="checkbox"
           checked={archived}
           onChange={(e) => apply({ archived: e.currentTarget.checked ? "1" : "" })}
-          className="size-4 accent-[var(--brand)]"
+          className="size-4 accent-brand"
         />
         Show archived
       </label>

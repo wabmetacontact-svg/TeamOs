@@ -13,7 +13,7 @@ import { provisionTenant } from "@/lib/provisioning";
  * Creating a workspace.
  *
  * Signing up does not create anything except a pending row. The tenant, its
- * roles, its pipelines and its first user all come into existence when somebody
+ * roles, its categories and its first user all come into existence when somebody
  * clicks the link — because until then nobody has proved they can read the
  * address, and an unverified signup that provisioned a real workspace would let
  * one person mint a thousand of them from addresses they do not own.

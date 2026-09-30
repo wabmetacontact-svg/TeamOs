@@ -193,7 +193,7 @@ export function MonthGrid({
                         type="checkbox"
                         checked={force}
                         onChange={(e) => setForce(e.currentTarget.checked)}
-                        className="size-4 accent-[var(--brand)]"
+                        className="size-4 accent-brand"
                       />
                       Close anyway — leaving them out is deliberate
                     </label>

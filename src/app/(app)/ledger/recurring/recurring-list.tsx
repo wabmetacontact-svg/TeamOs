@@ -347,7 +347,7 @@ function RuleForm({
       </Field>
 
       <label className="flex items-center gap-2 text-sm sm:col-span-2">
-        <input type="checkbox" name="active" defaultChecked={rule?.active ?? true} className="size-4 accent-[var(--brand)]" />
+        <input type="checkbox" name="active" defaultChecked={rule?.active ?? true} className="size-4 accent-brand" />
         Active — generates a draft each month
       </label>
 

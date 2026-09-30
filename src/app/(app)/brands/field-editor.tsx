@@ -218,7 +218,7 @@ export function FieldEditor({
                       type="checkbox"
                       checked={field.required}
                       onChange={(e) => patch(index, { required: e.currentTarget.checked })}
-                      className="size-4 accent-[var(--brand)]"
+                      className="size-4 accent-brand"
                     />
                     Required
                     {field.required && used < clientCount && clientCount > 0 && (

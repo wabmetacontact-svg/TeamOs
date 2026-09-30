@@ -12,7 +12,7 @@ export default function SignupPage() {
           <span className="flex size-9 items-center justify-center rounded-xl bg-brand text-sm font-bold text-white">TO</span>
           <div>
             <p className="text-[15px] font-semibold leading-tight">TeamOS</p>
-            <p className="text-xs leading-tight text-muted">Clients, pipelines and money in one place</p>
+            <p className="text-xs leading-tight text-muted">Clients, tasks and money in one place</p>
           </div>
         </div>
 

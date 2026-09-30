@@ -24,7 +24,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/team", label: "Team", show: can(scope, "user:view") },
     // The `people` table is external humans; the two are not the same list.
     { href: "/people", label: "Directory", show: can(scope, "person:view") },
-    { href: "/pipelines", label: "Pipelines", show: can(scope, "relationship:view") },
     { href: "/brands", label: "Brands", show: can(scope, "settings:view") },
     // Your own account, so nothing gates it.
     { href: "/security", label: "Security", show: true },

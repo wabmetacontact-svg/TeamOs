@@ -18,6 +18,7 @@ import { can } from "@/lib/scope";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, PageHeader } from "@/components/ui/card";
+import { MonthCalendar } from "./month-calendar";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
@@ -33,7 +34,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
     month: requested,
   });
 
-  const { money, tasks, pipeline, clients, approvals, month } = data;
+  const { money, tasks, calendar, clients, approvals, month } = data;
   const currency = user.baseCurrency;
 
   return (
@@ -105,6 +106,27 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
           href="/tasks?view=all&overdue=1"
         />
       </div>
+
+      <MonthCalendar
+        month={month}
+        today={calendar.today}
+        shows={calendar.shows}
+        closedBooks={calendar.closedBooks.map((b) => b.name)}
+        days={calendar.days.map((day) => ({
+          date: day.date,
+          tasks: day.tasks,
+          entries: day.entries,
+          moneyIn: day.moneyIn > 0n ? formatMoney(day.moneyIn, currency, { compact: true }) : null,
+          moneyOut: day.moneyOut > 0n ? formatMoney(day.moneyOut, currency, { compact: true }) : null,
+          recurring: day.recurring.map((r) => ({
+            id: r.id,
+            name: r.name,
+            direction: r.direction,
+            clientName: r.clientName,
+            amount: formatMoney(r.amount, r.currency, { compact: true }),
+          })),
+        }))}
+      />
 
       <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
         <div className="grid gap-4">
@@ -203,46 +225,6 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
               </div>
             </CardBody>
           </Card>
-
-          {pipeline.total > 0 && (
-            <Card>
-              <CardHeader
-                title="Pipelines"
-                description={`${pipeline.total} live · ${formatMoney(pipeline.value, currency, { compact: true })}`}
-              />
-              <CardBody className="grid gap-2 text-sm">
-                {pipeline.byContext.map((row) => (
-                  <Link
-                    key={row.contextId}
-                    href={`/pipelines?context=${row.contextId}`}
-                    className="flex items-baseline justify-between gap-3 hover:underline"
-                  >
-                    <span className="truncate">{row.name}</span>
-                    <span className="shrink-0 tabular-nums text-muted">
-                      {row.count}
-                      {row.value > 0n && ` · ${formatMoney(row.value, currency, { compact: true })}`}
-                    </span>
-                  </Link>
-                ))}
-
-                {pipeline.stalest.length > 0 && (
-                  <div className="mt-1 border-t border-border pt-2">
-                    <p className="mb-1 text-xs text-muted">Nobody has touched these</p>
-                    {pipeline.stalest.slice(0, 3).map((row) => (
-                      <Link
-                        key={row.id}
-                        href="/pipelines"
-                        className="flex items-baseline justify-between gap-3 text-xs hover:underline"
-                      >
-                        <span className="truncate">{row.personName}</span>
-                        <span className="shrink-0 text-subtle">{row.days}d</span>
-                      </Link>
-                    ))}
-                  </div>
-                )}
-              </CardBody>
-            </Card>
-          )}
 
           <Card>
             <CardHeader title="Clients" />

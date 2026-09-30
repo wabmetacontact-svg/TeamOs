@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Building2, GitBranch, Receipt, SearchX, SquareCheck, Users } from "lucide-react";
+import { Building2, Receipt, SearchX, SquareCheck, Users } from "lucide-react";
 import { requireScope } from "@/lib/auth";
 import { searchEverything, type SearchHit } from "@/lib/search";
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +14,6 @@ const ICONS: Record<SearchHit["type"], React.ReactNode> = {
   person: <Users className="size-4" />,
   task: <SquareCheck className="size-4" />,
   transaction: <Receipt className="size-4" />,
-  relationship: <GitBranch className="size-4" />,
 };
 
 const LABELS: Record<SearchHit["type"], string> = {
@@ -22,7 +21,6 @@ const LABELS: Record<SearchHit["type"], string> = {
   person: "People",
   task: "Tasks",
   transaction: "Ledger",
-  relationship: "Relationships",
 };
 
 export default async function SearchPage({ searchParams }: PageProps<"/search">) {
@@ -35,7 +33,7 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
     timeZone: user.timezone,
   });
 
-  // Grouped rather than interleaved: a flat list ranked across five entity
+  // Grouped rather than interleaved: a flat list ranked across four entity
   // types needs a relevance score nobody would trust, and the type is usually
   // what somebody already knows.
   const grouped = new Map<SearchHit["type"], SearchHit[]>();
@@ -47,7 +45,7 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
     <>
       <PageHeader
         title="Search"
-        description="Clients, people, tasks, ledger entries and relationships — as far as you can reach, and no further."
+        description="Clients, people, tasks and ledger entries — as far as you can reach, and no further."
       />
 
       <SearchBox initial={query} />

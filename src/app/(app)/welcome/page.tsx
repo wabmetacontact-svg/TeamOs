@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight, Building2, GitBranch, Receipt, ShieldAlert, Users } from "lucide-react";
+import { ArrowRight, Building2, Receipt, ShieldAlert, SquareCheck, Users } from "lucide-react";
 import { requireScope } from "@/lib/auth";
 import { tenantDb } from "@/lib/db";
 import { twoFactorRequiredFor } from "@/lib/totp";
@@ -22,13 +22,12 @@ export default async function WelcomePage() {
   const { user, scope } = await requireScope();
   const db = tenantDb(user.tenantId);
 
-  const [brands, clients, people, entries, roles, contexts] = await Promise.all([
+  const [brands, clients, tasks, entries, roles] = await Promise.all([
     db.brand.count(),
     db.client.count({ where: { deletedAt: null } }),
-    db.person.count({ where: { deletedAt: null } }),
+    db.task.count({ where: { deletedAt: null } }),
     db.transaction.count({ where: { deletedAt: null } }),
     db.role.count(),
-    db.context.count(),
   ]);
 
   const needsTwoFactor = twoFactorRequiredFor(scope.roleName);
@@ -56,11 +55,11 @@ export default async function WelcomePage() {
       body: "Import a CSV of a month you already keep, and check the totals match before anything is written.",
     },
     {
-      done: people > 0,
-      href: "/pipelines",
-      icon: <GitBranch className="size-4" />,
-      title: "Start a pipeline",
-      body: `You have ${contexts} to begin with. Add somebody to one and it becomes a board.`,
+      done: tasks > 0,
+      href: "/tasks",
+      icon: <SquareCheck className="size-4" />,
+      title: "Put the first task on somebody",
+      body: "With an estimate, which is compared against the real time when it is done.",
     },
     {
       done: false,
@@ -75,7 +74,7 @@ export default async function WelcomePage() {
     <>
       <PageHeader
         title={`${user.tenantName} is ready`}
-        description={`You are the Owner. ${roles} roles and ${contexts} pipelines are set up, along with a chart of accounts you can edit. Here is the order that works.`}
+        description={`You are the Owner. ${roles} roles are set up, along with a chart of accounts you can edit. Here is the order that works.`}
       />
 
       {needsTwoFactor && (
@@ -129,7 +128,6 @@ export default async function WelcomePage() {
         <CardHeader title="What is already here" description="Seeded so the workspace is usable on the first day" />
         <CardBody className="grid gap-2 text-sm sm:grid-cols-2">
           <Row label="Roles" value={`${roles} — Owner, Admin, Finance, Manager, Member`} />
-          <Row label="Pipelines" value={`${contexts} — Sales and Partnership, both editable`} />
           <Row label="Categories" value="A two-level chart of accounts, in and out" />
           <Row label="Base currency" value={`${user.baseCurrency} · ${user.timezone}`} />
         </CardBody>

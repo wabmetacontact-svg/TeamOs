@@ -168,7 +168,7 @@ export function NewTaskButton({
                 type="checkbox"
                 checked={recurring}
                 onChange={(e) => setRecurring(e.currentTarget.checked)}
-                className="mt-0.5 size-4 accent-[var(--brand)]"
+                className="mt-0.5 size-4 accent-brand"
               />
               <span>
                 Repeats
@@ -214,7 +214,7 @@ export function NewTaskButton({
                 type="checkbox"
                 checked={isPrivate}
                 onChange={(e) => setIsPrivate(e.currentTarget.checked)}
-                className="mt-0.5 size-4 accent-[var(--brand)]"
+                className="mt-0.5 size-4 accent-brand"
               />
               <span>
                 Private

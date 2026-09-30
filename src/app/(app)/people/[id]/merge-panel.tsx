@@ -97,9 +97,8 @@ export function MergePanel({
           ) : (
             <>
               <p className="text-sm">
-                Moving into {keepName}: <strong>{preview.relationships}</strong>{" "}
-                {preview.relationships === 1 ? "relationship" : "relationships"}, <strong>{preview.activities}</strong>{" "}
-                logged {preview.activities === 1 ? "item" : "items"}
+                Moving into {keepName}: <strong>{preview.activities}</strong> logged{" "}
+                {preview.activities === 1 ? "item" : "items"}
                 {preview.contacts > 0 && (
                   <>
                     , <strong>{preview.contacts}</strong> client {preview.contacts === 1 ? "link" : "links"}
@@ -116,7 +115,7 @@ export function MergePanel({
                         type="checkbox"
                         checked={adoptEmail}
                         onChange={(e) => setAdoptEmail(e.currentTarget.checked)}
-                        className="size-4 accent-[var(--brand)]"
+                        className="size-4 accent-brand"
                       />
                       Take their email — {keepName} has none
                     </label>
@@ -127,7 +126,7 @@ export function MergePanel({
                         type="checkbox"
                         checked={adoptPhone}
                         onChange={(e) => setAdoptPhone(e.currentTarget.checked)}
-                        className="size-4 accent-[var(--brand)]"
+                        className="size-4 accent-brand"
                       />
                       Take their phone — {keepName} has none
                     </label>
@@ -136,8 +135,8 @@ export function MergePanel({
               )}
 
               <p className="text-xs text-muted">
-                {preview.mergeName}&rsquo;s row is retired rather than erased, with a note saying where it went. A
-                relationship in a pipeline you cannot see moves too — it has to, or it would be stranded on a retired
+                {preview.mergeName}&rsquo;s row is retired rather than erased, with a note saying where it went.
+                Anything attached to it moves too, including what you cannot see, so nothing is stranded on a retired
                 row.
               </p>
 

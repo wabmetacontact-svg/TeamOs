@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Building2, EyeOff } from "lucide-react";
+import { ArrowLeft, Building2 } from "lucide-react";
 import { requireScope } from "@/lib/auth";
 import { tenantDb } from "@/lib/db";
 import { personSummary } from "@/lib/relationships";
@@ -10,7 +10,6 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, Card, CardBody, CardHeader, PageHeader } from "@/components/ui/card";
 import { PersonEditor } from "./person-editor";
 import { MergePanel } from "./merge-panel";
-import { RelationshipPanel } from "./relationship-panel";
 import { ActivityPanel } from "./activity-panel";
 
 export async function generateMetadata({ params }: PageProps<"/people/[id]">): Promise<Metadata> {
@@ -36,17 +35,11 @@ export default async function PersonPage({ params }: PageProps<"/people/[id]">) 
     throw err;
   }
 
-  const { person, relationships, hiddenCount, activities } = summary;
+  // Pipelines were removed from the product; the relationships already in the
+  // database stay where they are, and notes tied to a pipeline this person
+  // cannot see stay hidden by personSummary exactly as before.
+  const { person, activities } = summary;
   const db = tenantDb(user.tenantId);
-
-  const [contexts, owners] = await Promise.all([
-    db.context.findMany({
-      where: scope.allContexts ? {} : { id: { in: [...scope.contextIds] } },
-      include: { stages: { orderBy: { position: "asc" } } },
-      orderBy: { position: "asc" },
-    }),
-    db.user.findMany({ where: { status: "Active" }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
-  ]);
 
   // Candidates for a merge. Names close to this one first, because that is what
   // a duplicate looks like — same human, entered twice.
@@ -58,9 +51,6 @@ export default async function PersonPage({ params }: PageProps<"/people/[id]">) 
         take: 100,
       })
     : [];
-
-  // Pipelines this person is not already in, and that this caller can file into.
-  const available = contexts.filter((c) => !relationships.some((r) => r.contextId === c.id));
 
   return (
     <>
@@ -79,73 +69,17 @@ export default async function PersonPage({ params }: PageProps<"/people/[id]">) 
         description={[person.email, person.phone].filter(Boolean).join(" · ") || "No contact details yet"}
       />
 
-      {/*
-        The awareness banner. It says a relationship exists and refuses to say
-        anything else — not the pipeline, not the owner, not the stage. Enough
-        to stop a second person cold-approaching them; never enough to learn
-        what the first approach is about.
-      */}
-      {hiddenCount > 0 && (
-        <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-border bg-surface-2 px-4 py-3 text-sm">
-          <EyeOff className="mt-0.5 size-4 shrink-0 text-subtle" />
-          <div>
-            <p className="font-medium">
-              {hiddenCount} other {hiddenCount === 1 ? "relationship" : "relationships"} with {person.name.split(" ")[0]}
-            </p>
-            <p className="mt-0.5 text-muted">
-              Somebody here already has a line to them in a pipeline you are not scoped to. Check before reaching out
-              cold — ask an Owner if you need the detail.
-            </p>
-          </div>
-        </div>
-      )}
-
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
         <div className="grid gap-4">
           <Card>
             <CardHeader
-              title="Relationships"
-              description={
-                relationships.length === 0
-                  ? "None you can see"
-                  : `${relationships.length} in ${relationships.length === 1 ? "one pipeline" : "separate pipelines"}, each with its own owner and stage`
-              }
-            />
-            <CardBody>
-              <RelationshipPanel
-                personId={person.id}
-                canEdit={can(scope, "relationship:edit")}
-                canCreate={can(scope, "relationship:create")}
-                available={available.map((c) => ({ id: c.id, name: c.name, stages: c.stages.map((s) => ({ id: s.id, name: s.name })) }))}
-                owners={owners}
-                relationships={relationships.map((r) => ({
-                  id: r.id,
-                  contextId: r.contextId,
-                  contextName: r.context.name,
-                  stageId: r.stageId,
-                  stageName: r.stage?.name ?? null,
-                  isTerminal: r.stage?.isTerminal ?? false,
-                  ownerName: r.owner?.name ?? null,
-                  clientName: r.client?.name ?? null,
-                  value: r.value?.toString() ?? null,
-                  currency: r.currency,
-                  notes: r.notes,
-                  stages: contexts.find((c) => c.id === r.contextId)?.stages.map((s) => ({ id: s.id, name: s.name })) ?? [],
-                }))}
-              />
-            </CardBody>
-          </Card>
-
-          <Card>
-            <CardHeader
               title="What has happened"
-              description="A note tied to a pipeline is only visible to people scoped to it; an untied one is about the person"
+              description="Calls, meetings, messages and notes about this person"
             />
             <CardBody>
               <ActivityPanel
                 personId={person.id}
-                canEdit={can(scope, "relationship:edit")}
-                relationships={relationships.map((r) => ({ id: r.id, label: r.context.name }))}
+                canEdit={can(scope, "person:edit")}
                 activities={activities.map((a) => ({
                   id: a.id,
                   type: a.type,
@@ -162,7 +96,7 @@ export default async function PersonPage({ params }: PageProps<"/people/[id]">) 
 
         <div className="grid content-start gap-4">
           <Card>
-            <CardHeader title="Details" description="One row per human, shared across every pipeline" />
+            <CardHeader title="Details" description="One row per human, however many clients they are a contact at" />
             <CardBody>
               <PersonEditor
                 canEdit={can(scope, "person:edit")}

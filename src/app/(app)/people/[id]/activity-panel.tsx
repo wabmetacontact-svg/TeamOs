@@ -8,7 +8,7 @@ import { MessageSquare, Phone, StickyNote, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
-import { logActivity } from "../../pipelines/actions";
+import { logActivity } from "../actions";
 
 type Activity = {
   id: string;
@@ -30,12 +30,10 @@ const ICONS: Record<string, typeof Phone> = {
 export function ActivityPanel({
   personId,
   activities,
-  relationships,
   canEdit,
 }: {
   personId: string;
   activities: Activity[];
-  relationships: { id: string; label: string }[];
   canEdit: boolean;
 }) {
   const router = useRouter();
@@ -53,7 +51,6 @@ export function ActivityPanel({
                 setError(null);
                 const result = await logActivity({
                   personId,
-                  relationshipId: String(formData.get("relationshipId") ?? "") || undefined,
                   type: String(formData.get("type") ?? "Note") as (typeof ACTIVITY_TYPES)[number],
                   subject: String(formData.get("subject") ?? ""),
                   body: String(formData.get("body") ?? "") || undefined,
@@ -67,27 +64,12 @@ export function ActivityPanel({
             }
             className="grid gap-3 rounded-lg border border-border bg-surface-2 p-3"
           >
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <Field label="What" htmlFor="a-type">
                 <Select id="a-type" name="type" defaultValue="Note">
                   {ACTIVITY_TYPES.map((t) => (
                     <option key={t} value={t}>
                       {t}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-
-              <Field
-                label="Pipeline"
-                htmlFor="a-rel"
-                hint={relationships.length ? undefined : "No pipeline — this will be a note about the person"}
-              >
-                <Select id="a-rel" name="relationshipId" defaultValue="">
-                  <option value="">About the person</option>
-                  {relationships.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.label}
                     </option>
                   ))}
                 </Select>
@@ -99,7 +81,7 @@ export function ActivityPanel({
             </div>
 
             <Field label="Summary" htmlFor="a-subject" required>
-              <Input id="a-subject" name="subject" placeholder="Seed terms discussed" required autoFocus />
+              <Input id="a-subject" name="subject" placeholder="Discussed the Q4 brief" required autoFocus />
             </Field>
 
             <Field label="Detail" htmlFor="a-body">

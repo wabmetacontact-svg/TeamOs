@@ -187,7 +187,7 @@ export function TaskEditor({
               type="checkbox"
               checked={recurring}
               onChange={(e) => setRecurring(e.currentTarget.checked)}
-              className="size-4 accent-[var(--brand)]"
+              className="size-4 accent-brand"
             />
             Repeats
           </label>
@@ -227,7 +227,7 @@ export function TaskEditor({
               type="checkbox"
               checked={isPrivate}
               onChange={(e) => setIsPrivate(e.currentTarget.checked)}
-              className="size-4 accent-[var(--brand)]"
+              className="size-4 accent-brand"
             />
             Private — only on yourself
           </label>

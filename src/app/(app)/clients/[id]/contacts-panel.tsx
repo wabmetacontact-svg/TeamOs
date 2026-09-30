@@ -140,7 +140,7 @@ export function ContactsPanel({
             </div>
 
             <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" name="isPrimary" className="size-4 accent-[var(--brand)]" />
+              <input type="checkbox" name="isPrimary" className="size-4 accent-brand" />
               Primary contact
             </label>
 

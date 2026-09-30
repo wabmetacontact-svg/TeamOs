@@ -5,8 +5,7 @@
  *
  * A new workspace has to be *usable*. A tenant row on its own is a working
  * application that refuses to do anything: no roles, so nobody can be granted
- * anything; no pipelines, so the relationship module has nowhere to put a
- * person; no categories, so every ledger entry is uncategorised. The first
+ * anything; no categories, so every ledger entry is uncategorised. The first
  * person through the door would leave.
  *
  * And a new workspace has to be *isolated from the first minute*. The whole
@@ -56,7 +55,7 @@ afterAll(async () => {
 });
 
 describe("a new workspace is usable on its first day", () => {
-  test("it arrives with roles, pipelines and a chart of accounts", async () => {
+  test("it arrives with roles and a chart of accounts, and no pipelines", async () => {
     const { tenantId, userId } = await provision(`Acme ${suffix}`, `owner-acme-${suffix}@test.dev`);
     const db = tenantDb(tenantId);
 
@@ -69,8 +68,10 @@ describe("a new workspace is usable on its first day", () => {
     ]);
 
     expect(roles.map((r) => r.name).sort()).toEqual(["Admin", "Finance", "Manager", "Member", "Owner"]);
-    expect(contexts).toBeGreaterThan(0);
-    expect(stages).toBeGreaterThan(0);
+    // Pipelines were removed from the product; a pipeline nobody can see or
+    // edit is clutter in the database, not a starting point.
+    expect(contexts).toBe(0);
+    expect(stages).toBe(0);
     expect(categories).toBeGreaterThan(0);
 
     // The first user owns the place and can reach everything in it.
@@ -116,15 +117,6 @@ describe("a new workspace is usable on its first day", () => {
     // deletes before they can start.
     expect(await db.brand.count()).toBe(0);
     expect(await db.client.count()).toBe(0);
-  });
-
-  test("the stages it ships with include a way to close something", async () => {
-    const tenantId = created[0]!;
-    const terminal = await tenantDb(tenantId).pipelineStage.count({ where: { isTerminal: true } });
-
-    // A pipeline with no ending accumulates forever and nobody ever closes
-    // anything.
-    expect(terminal).toBeGreaterThan(0);
   });
 });
 

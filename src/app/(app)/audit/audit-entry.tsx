@@ -23,10 +23,10 @@ const ROUTES: Record<string, (id: string) => string | null> = {
   Transaction: (id) => `/ledger/${id}`,
   Task: (id) => `/tasks/${id}`,
   Person: (id) => `/people/${id}`,
-  Relationship: () => `/pipelines`,
+  Relationship: () => null,
   User: () => `/team`,
   Brand: () => `/brands`,
-  Context: () => `/pipelines/manage`,
+  Context: () => null,
   BookMonth: () => `/ledger/months`,
 };
 

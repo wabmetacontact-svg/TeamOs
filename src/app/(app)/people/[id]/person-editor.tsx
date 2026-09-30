@@ -5,7 +5,7 @@ import { useState, useTransition } from "react";
 import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Textarea } from "@/components/ui/input";
-import { updatePerson } from "../../pipelines/actions";
+import { updatePerson } from "../actions";
 
 type Person = { id: string; name: string; email: string; phone: string; notes: string };
 
@@ -71,7 +71,7 @@ export function PersonEditor({ person, canEdit }: { person: Person; canEdit: boo
         <Input id="p-phone" name="phone" defaultValue={person.phone} />
       </Field>
 
-      <Field label="About them" htmlFor="p-notes" hint="Shared across every pipeline they appear in">
+      <Field label="About them" htmlFor="p-notes" hint="Anything worth knowing about them">
         <Textarea id="p-notes" name="notes" defaultValue={person.notes} />
       </Field>
 

@@ -179,11 +179,10 @@ describe("it finds things", () => {
     expect((await searchEverything(admin(), `TX-${suffix}-VIS`)).hits.some((h) => h.type === "transaction")).toBe(true);
   });
 
-  test("a person, a task and a relationship", async () => {
+  test("a person and a task", async () => {
     const person = await searchEverything(admin(), "Priya");
-    expect(person.hits.some((h) => h.type === "person")).toBe(true);
-    // One person in two pipelines is two relationship hits and one person hit.
-    expect(person.hits.filter((h) => h.type === "relationship")).toHaveLength(2);
+    // One human, one hit — however many pipelines the old data put them in.
+    expect(person.hits.filter((h) => h.type === "person")).toHaveLength(1);
 
     expect((await searchEverything(admin(), "Copper")).hits.some((h) => h.type === "task")).toBe(true);
   });
@@ -235,34 +234,29 @@ describe("it cannot be used to find what you may not see", () => {
     expect((await searchEverything(admin(), "Velvet")).hits.some((h) => h.type === "task")).toBe(true);
   });
 
-  test("a relationship in a pipeline outside the scope", async () => {
+  test("a person held in a pipeline outside the scope says nothing about it", async () => {
     const results = await searchEverything(narrow(), "Priya");
 
-    // The person is not secret — people never are. The Investor relationship
-    // is, and only the KOL one comes back.
+    // The person is not secret — people never are. The pipeline is.
     expect(results.hits.some((h) => h.type === "person")).toBe(true);
-    expect(results.hits.filter((h) => h.type === "relationship")).toHaveLength(1);
     expect(JSON.stringify(results)).not.toContain(investorCtx);
   });
 
-  test("searching a hidden relationship's own notes finds nothing", async () => {
-    expect((await searchEverything(narrow(), "Cheque discussion")).hits.every((h) => h.type !== "relationship")).toBe(
-      true,
-    );
-    expect((await searchEverything(admin(), "Cheque discussion")).hits.some((h) => h.type === "relationship")).toBe(
-      true,
-    );
+  test("relationship notes are no longer searched at all", async () => {
+    // The Pipelines screens are gone; their rows remain in the database, and
+    // search must not become the one door still open onto them.
+    expect((await searchEverything(narrow(), "Cheque discussion")).hits).toEqual([]);
+    expect((await searchEverything(admin(), "Cheque discussion")).hits).toEqual([]);
   });
 
   test("a user with nothing granted finds nothing but people", async () => {
     const stranded: Scope = { ...narrow(), clientIds: [], contextIds: [] };
     const results = await searchEverything(stranded, suffix);
 
-    // Clients, transactions, relationships: all gone. People remain, because
+    // Clients and transactions: all gone. People remain, because
     // the directory is deliberately workspace-wide — the banner is what keeps
     // that honest, not hiding the person.
     expect(results.counts.client).toBe(0);
     expect(results.counts.transaction).toBe(0);
-    expect(results.counts.relationship).toBe(0);
   });
 });

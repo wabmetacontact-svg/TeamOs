@@ -3,9 +3,9 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import { Search, X } from "lucide-react";
-import { Input, Select } from "@/components/ui/input";
+import { Input } from "@/components/ui/input";
 
-export function DirectoryFilters({ contexts }: { contexts: { id: string; name: string }[] }) {
+export function DirectoryFilters() {
   const router = useRouter();
   const params = useSearchParams();
   const [, start] = useTransition();
@@ -28,7 +28,7 @@ export function DirectoryFilters({ contexts }: { contexts: { id: string; name: s
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
 
-  const active = q || params.get("context");
+  const active = q;
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -42,22 +42,6 @@ export function DirectoryFilters({ contexts }: { contexts: { id: string; name: s
           aria-label="Search people"
         />
       </div>
-
-      {contexts.length > 0 && (
-        <Select
-          value={params.get("context") ?? ""}
-          onChange={(e) => apply({ context: e.currentTarget.value })}
-          aria-label="Filter by pipeline"
-          className="w-auto min-w-36"
-        >
-          <option value="">All pipelines</option>
-          {contexts.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </Select>
-      )}
 
       {active && (
         <button

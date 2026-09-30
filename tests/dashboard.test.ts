@@ -17,7 +17,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { approvalView, clientView, loadDashboard, moneyView, taskView } from "../src/lib/dashboard";
+import { approvalView, calendarView, clientView, loadDashboard, moneyView, taskView } from "../src/lib/dashboard";
 import { dueDateFrom } from "../src/lib/task-rules";
 import type { Scope } from "../src/lib/scope";
 
@@ -155,6 +155,15 @@ beforeAll(async () => {
           { tenantId, name: "Internal", assigneeId: m.id, assignedById: f.id, dueDate: dueDateFrom("2026-06-10", IST), estimatedMinutes: 30 },
         ],
       });
+
+      // Recurring spends, for the calendar. Gamma's still has to post in June;
+      // Alpha's already has, so its next run is in July.
+      await tx.recurringSpend.createMany({
+        data: [
+          { tenantId, clientId: c.id, name: "Gamma retainer", amount: 500_000n, dayOfMonth: 20, nextRunAt: new Date("2026-06-20T00:00:00Z") },
+          { tenantId, clientId: a.id, name: "Alpha hosting", amount: 100_000n, dayOfMonth: 5, nextRunAt: new Date("2026-07-05T00:00:00Z") },
+        ],
+      });
     },
     { timeout: 120_000 },
   );
@@ -248,6 +257,62 @@ describe("two people, one month, two correct answers", () => {
     expect(all.value).toBe(9_999_900n);
     // The submitted entry is on Alpha, which the Manager can see.
     expect(mine.waiting).toBe(1);
+  });
+});
+
+describe("the calendar adds up to the same thing, day by day", () => {
+  const day = (view: Awaited<ReturnType<typeof calendarView>>, date: string) => view.days.find((d) => d.date === date);
+
+  test("tasks land on the day they are due, in the tenant's timezone", async () => {
+    const all = await calendarView(ctx(everyone()));
+
+    const tenth = day(all, "2026-06-10");
+    expect(tenth?.tasks.map((t) => t.name).sort()).toEqual(["A task", "C task", "Internal"]);
+    // June is behind us and none of them are done.
+    expect(tenth?.tasks.every((t) => t.overdue)).toBe(true);
+  });
+
+  test("money on a day matches the month's hand-computed totals", async () => {
+    const all = day(await calendarView(ctx(everyone())), "2026-06-15");
+    const mine = day(await calendarView(ctx(scoped())), "2026-06-15");
+
+    expect(all?.moneyIn).toBe(EXPECTED.all.income);
+    expect(all?.moneyOut).toBe(EXPECTED.all.spend);
+    // Every entry dated that day is counted, approved or not.
+    expect(all?.entries).toBe(8);
+
+    expect(mine?.moneyIn).toBe(EXPECTED.scoped.income);
+    expect(mine?.moneyOut).toBe(EXPECTED.scoped.spend);
+    expect(mine?.entries).toBe(6);
+  });
+
+  test("a recurring spend shows until it posts, and only for clients in reach", async () => {
+    const all = await calendarView(ctx(everyone()));
+    const mine = await calendarView(ctx(scoped()));
+
+    expect(day(all, "2026-06-20")?.recurring.map((r) => r.name)).toEqual(["Gamma retainer"]);
+    // Alpha's has already posted for June; it is not shown a second time.
+    expect(day(all, "2026-06-05")).toBeUndefined();
+
+    expect(day(mine, "2026-06-20")).toBeUndefined();
+  });
+
+  test("a client outside the scope appears nowhere in it", async () => {
+    const mine = await calendarView(ctx(scoped()));
+
+    expect(day(mine, "2026-06-10")?.tasks.map((t) => t.name).sort()).toEqual(["A task", "Internal"]);
+    const serialised = JSON.stringify(mine, (_, v) => (typeof v === "bigint" ? v.toString() : v));
+    expect(serialised).not.toContain("Gamma");
+    expect(serialised).not.toContain(clientC);
+  });
+
+  test("without permission for a part, that part is not fetched at all", async () => {
+    const tasksOnly: Scope = { ...scoped(), permissions: new Set(["dashboard:view_scoped", "task:view"]) };
+    const view = await calendarView(ctx(tasksOnly));
+
+    expect(view.shows).toEqual({ tasks: true, money: false });
+    expect(view.days.every((d) => d.entries === 0 && d.moneyIn === 0n && d.recurring.length === 0)).toBe(true);
+    expect(day(view, "2026-06-15")).toBeUndefined();
   });
 });
 

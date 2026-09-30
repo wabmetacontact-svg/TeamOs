@@ -1,26 +1,26 @@
 import "server-only";
 import { tenantDb } from "./db";
-import { clientIdScope, clientScope, contextScope, type Scope } from "./scope";
+import { clientIdScope, clientScope, type Scope } from "./scope";
 import { formatMoney } from "./money";
 import { dateOnly } from "./task-rules";
 
 /**
  * Search across everything, within what the caller can reach.
  *
- * One box, five entity types, one scope. The scope is the whole difficulty:
+ * One box, four entity types, one scope. The scope is the whole difficulty:
  * search is the single easiest place to leak, because a query that "just
  * looks in every table" is exactly what somebody writes, and the leak only
  * shows up if a test types a hidden record's name into it.
  *
  * So every branch below reuses the same scope fragment its own module uses —
- * `clientScope`, `contextScope`, the task privacy filter — rather than
+ * `clientScope`, `clientIdScope`, the task privacy filter — rather than
  * inventing a filter for search. A search that needed its own rules would be a
  * second set of rules to keep in step, which is a leak waiting for a
  * refactor.
  */
 
 export type SearchHit = {
-  type: "client" | "person" | "task" | "transaction" | "relationship";
+  type: "client" | "person" | "task" | "transaction";
   id: string;
   title: string;
   subtitle: string;
@@ -44,7 +44,7 @@ export async function searchEverything(
   const empty: SearchResults = {
     query: q,
     hits: [],
-    counts: { client: 0, person: 0, task: 0, transaction: 0, relationship: 0 },
+    counts: { client: 0, person: 0, task: 0, transaction: 0 },
   };
 
   // Two characters is the floor: one character matches most of the database
@@ -56,7 +56,7 @@ export async function searchEverything(
   const timeZone = options.timeZone ?? "UTC";
   const contains = { contains: q, mode: "insensitive" as const };
 
-  const [clients, people, tasks, transactions, relationships] = await Promise.all([
+  const [clients, people, tasks, transactions] = await Promise.all([
     db.client.findMany({
       where: {
         ...clientIdScope(scope),
@@ -112,22 +112,6 @@ export async function searchEverything(
       },
       take: PER_TYPE,
     }),
-
-    db.relationship.findMany({
-      where: {
-        ...contextScope(scope),
-        deletedAt: null,
-        OR: [{ person: { name: contains } }, { person: { email: contains } }, { notes: contains }],
-      },
-      select: {
-        id: true,
-        personId: true,
-        person: { select: { name: true } },
-        context: { select: { name: true } },
-        stage: { select: { name: true } },
-      },
-      take: PER_TYPE,
-    }),
   ]);
 
   const hits: SearchHit[] = [
@@ -170,15 +154,6 @@ export async function searchEverything(
       href: `/ledger/${t.id}`,
     })),
 
-    ...relationships.map((r): SearchHit => ({
-      type: "relationship",
-      id: r.id,
-      title: r.person.name,
-      subtitle: [r.context.name, r.stage?.name].filter(Boolean).join(" · "),
-      // To the person, not the relationship: that page shows every
-      // relationship they hold, which is almost always what was wanted.
-      href: `/people/${r.personId}`,
-    })),
   ];
 
   return {
@@ -189,7 +164,6 @@ export async function searchEverything(
       person: people.length,
       task: tasks.length,
       transaction: transactions.length,
-      relationship: relationships.length,
     },
   };
 }

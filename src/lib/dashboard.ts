@@ -1,7 +1,7 @@
 import "server-only";
 import type { PrismaClient } from "@prisma/client";
 import { tenantTransaction } from "./db";
-import { clientIdScope, clientScope, contextScope, dashboardReach, type Scope } from "./scope";
+import { can, clientIdScope, clientScope, dashboardReach, type Scope } from "./scope";
 import { bookMonthOf, previousBookMonth } from "./money";
 import { dateOnly } from "./task-rules";
 
@@ -267,70 +267,198 @@ export async function taskView(ctx: DashboardContext, client?: Db): Promise<Task
   };
 }
 
-// ───────────────────────────────────────────────────────────── pipelines ───
+// ────────────────────────────────────────────────────────────── calendar ───
 
-export type PipelineView = {
-  total: number;
-  value: bigint;
-  byContext: { contextId: string; name: string; count: number; value: bigint }[];
-  stalest: { id: string; personName: string; contextName: string; stageName: string | null; days: number }[];
+export type CalendarTask = {
+  id: string;
+  name: string;
+  status: string;
+  priority: string;
+  assigneeName: string;
+  clientName: string | null;
+  overdue: boolean;
 };
 
-export async function pipelineView(ctx: DashboardContext, client?: Db): Promise<PipelineView> {
-  // Called on its own it opens its own transaction; called from
-  // loadDashboard it shares the one already open.
-  if (!client) return tenantTransaction(ctx.scope.tenantId, (tx) => pipelineView(ctx, tx));
-  const db = client;
-  const scoped = contextScope(ctx.scope);
+export type CalendarRecurring = {
+  id: string;
+  name: string;
+  direction: string;
+  amount: bigint;
+  currency: string;
+  clientName: string;
+};
 
-  const [grouped, contexts, stale] = await Promise.all([
-    db.relationship.groupBy({
-      by: ["contextId"],
-      where: { ...scoped, deletedAt: null, stage: { isTerminal: false } },
-      _count: { _all: true },
-      _sum: { value: true },
-    }),
-    db.context.findMany({
-      where: ctx.scope.allContexts ? {} : { id: { in: [...ctx.scope.contextIds] } },
-      select: { id: true, name: true },
-    }),
-    // The ones nobody has touched. A pipeline's real failure mode is not a
-    // lost deal, it is one that quietly stops moving.
-    db.relationship.findMany({
-      where: { ...scoped, deletedAt: null, stage: { isTerminal: false } },
-      select: {
-        id: true,
-        updatedAt: true,
-        person: { select: { name: true } },
-        context: { select: { name: true } },
-        stage: { select: { name: true } },
-      },
-      orderBy: { updatedAt: "asc" },
-      take: 5,
+export type CalendarDay = {
+  /** yyyy-MM-dd */
+  date: string;
+  tasks: CalendarTask[];
+  /** Approved money on the day it happened, in the base currency. */
+  moneyIn: bigint;
+  moneyOut: bigint;
+  /** Every entry dated that day, whatever its approval state. */
+  entries: number;
+  /** Monthly rules that will post on this day and have not yet. */
+  recurring: CalendarRecurring[];
+};
+
+export type CalendarView = {
+  month: string;
+  today: string;
+  /** Only the days with something on them. */
+  days: CalendarDay[];
+  /** Clients whose book for this month is closed. */
+  closedBooks: { clientId: string; name: string }[];
+  /** What the viewer may see, so an empty calendar is not mistaken for a quiet month. */
+  shows: { tasks: boolean; money: boolean };
+};
+
+/**
+ * One month, day by day: the work due, the money that moved, the recurring
+ * spends still to post, and which books are closed.
+ *
+ * Every part is bounded the way the rest of the dashboard is — tasks by the
+ * same filter as taskView (reach, client scope, privacy), money by
+ * clientScope — so a day never shows a total the cards above it would refuse
+ * to add up. A part the viewer has no permission for is not fetched at all.
+ */
+export async function calendarView(ctx: DashboardContext, client?: Db): Promise<CalendarView> {
+  if (!client) return tenantTransaction(ctx.scope.tenantId, (tx) => calendarView(ctx, tx));
+  const db = client;
+  const month = monthOf(ctx);
+  const today = dateOnly(new Date(), ctx.timeZone);
+  const reach = dashboardReach(ctx.scope);
+
+  const showsTasks = can(ctx.scope, "task:view");
+  const showsMoney = can(ctx.scope, "expense:view");
+
+  const [year, monthNumber] = month.split("-").map(Number) as [number, number];
+  const lastDay = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  const first = `${month}-01`;
+  const last = `${month}-${String(lastDay).padStart(2, "0")}`;
+  const monthStart = new Date(`${first}T00:00:00.000Z`);
+  const monthEnd = new Date(`${last}T23:59:59.999Z`);
+
+  // A due date is stored at midday in the tenant's timezone, so a day either
+  // side of the month in UTC catches every one of them; which day it belongs
+  // to is decided below, in the tenant's timezone.
+  const dueFrom = new Date(monthStart.getTime() - 86_400_000);
+  const dueTo = new Date(monthEnd.getTime() + 86_400_000);
+
+  const taskBase = {
+    deletedAt: null,
+    ...(ctx.scope.allClients ? {} : { OR: [{ clientId: null }, { clientId: { in: [...ctx.scope.clientIds] } }] }),
+    ...(reach === "own" ? { assigneeId: ctx.scope.userId } : {}),
+    AND: [{ OR: [{ isPrivate: false }, { assigneeId: ctx.scope.userId }] }],
+  };
+  const scoped = clientScope(ctx.scope);
+
+  const [tasks, approved, counted, rules, closed] = await Promise.all([
+    showsTasks
+      ? db.task.findMany({
+          where: { ...taskBase, dueDate: { gte: dueFrom, lte: dueTo } },
+          select: {
+            id: true,
+            name: true,
+            status: true,
+            priority: true,
+            dueDate: true,
+            assignee: { select: { name: true } },
+            client: { select: { name: true } },
+          },
+          orderBy: [{ dueDate: "asc" }, { name: "asc" }],
+          take: 1000,
+        })
+      : Promise.resolve([]),
+    // Ledger dates are calendar dates, stored at midnight UTC.
+    showsMoney
+      ? db.transaction.groupBy({
+          by: ["date", "direction"],
+          where: { ...scoped, deletedAt: null, approvalState: "Approved", date: { gte: monthStart, lte: monthEnd } },
+          _sum: { amountBase: true },
+        })
+      : Promise.resolve([]),
+    showsMoney
+      ? db.transaction.groupBy({
+          by: ["date"],
+          where: { ...scoped, deletedAt: null, date: { gte: monthStart, lte: monthEnd } },
+          _count: { _all: true },
+        })
+      : Promise.resolve([]),
+    showsMoney
+      ? db.recurringSpend.findMany({
+          where: { ...scoped, active: true, nextRunAt: { lte: monthEnd } },
+          select: {
+            id: true,
+            name: true,
+            direction: true,
+            amount: true,
+            currency: true,
+            dayOfMonth: true,
+            nextRunAt: true,
+            client: { select: { name: true } },
+          },
+        })
+      : Promise.resolve([]),
+    db.bookMonth.findMany({
+      where: { ...scoped, month, state: "Closed" },
+      select: { clientId: true, client: { select: { name: true } } },
     }),
   ]);
 
-  const nameById = new Map(contexts.map((c) => [c.id, c.name]));
-  const now = Date.now();
+  const days = new Map<string, CalendarDay>();
+  const day = (date: string) => {
+    let entry = days.get(date);
+    if (!entry) {
+      entry = { date, tasks: [], moneyIn: 0n, moneyOut: 0n, entries: 0, recurring: [] };
+      days.set(date, entry);
+    }
+    return entry;
+  };
+
+  for (const task of tasks) {
+    const date = dateOnly(task.dueDate, ctx.timeZone);
+    if (!date.startsWith(month)) continue;
+    day(date).tasks.push({
+      id: task.id,
+      name: task.name,
+      status: task.status,
+      priority: task.priority,
+      assigneeName: task.assignee.name,
+      clientName: task.client?.name ?? null,
+      overdue: task.status !== "Completed" && date < today,
+    });
+  }
+
+  for (const row of approved) {
+    const entry = day(row.date.toISOString().slice(0, 10));
+    const total = row._sum.amountBase ?? 0n;
+    if (row.direction === "IN") entry.moneyIn += total;
+    else entry.moneyOut += total;
+  }
+
+  for (const row of counted) day(row.date.toISOString().slice(0, 10)).entries += row._count._all;
+
+  // A monthly rule posts on its day. One whose next run is already past that
+  // day has posted for this month, and its entry is counted above instead.
+  for (const rule of rules) {
+    const date = `${month}-${String(Math.min(rule.dayOfMonth, lastDay)).padStart(2, "0")}`;
+    if (date < rule.nextRunAt.toISOString().slice(0, 10)) continue;
+    day(date).recurring.push({
+      id: rule.id,
+      name: rule.name,
+      direction: rule.direction,
+      amount: rule.amount,
+      currency: rule.currency,
+      clientName: rule.client.name,
+    });
+  }
 
   return {
-    total: grouped.reduce((n, r) => n + r._count._all, 0),
-    value: grouped.reduce((sum, r) => sum + (r._sum.value ?? 0n), 0n),
-    byContext: grouped
-      .map((row) => ({
-        contextId: row.contextId,
-        name: nameById.get(row.contextId) ?? "Unknown",
-        count: row._count._all,
-        value: row._sum.value ?? 0n,
-      }))
-      .sort((a, b) => b.count - a.count),
-    stalest: stale.map((r) => ({
-      id: r.id,
-      personName: r.person.name,
-      contextName: r.context.name,
-      stageName: r.stage?.name ?? null,
-      days: Math.floor((now - r.updatedAt.getTime()) / 86_400_000),
-    })),
+    month,
+    today,
+    days: [...days.values()].sort((a, b) => a.date.localeCompare(b.date)),
+    closedBooks: closed.map((b) => ({ clientId: b.clientId, name: b.client.name })),
+    shows: { tasks: showsTasks, money: showsMoney },
   };
 }
 
@@ -418,7 +546,7 @@ export type Dashboard = {
   month: string;
   money: MoneyView;
   tasks: TaskView;
-  pipeline: PipelineView;
+  calendar: CalendarView;
   clients: ClientView;
   approvals: ApprovalView;
 };
@@ -434,10 +562,10 @@ export type Dashboard = {
 export async function loadDashboard(ctx: DashboardContext): Promise<Dashboard> {
   // In parallel, deliberately. See the note at the top of this file for the
   // measurement that settled it.
-  const [money, tasks, pipeline, clients, approvals] = await Promise.all([
+  const [money, tasks, calendar, clients, approvals] = await Promise.all([
     moneyView(ctx),
     taskView(ctx),
-    pipelineView(ctx),
+    calendarView(ctx),
     clientView(ctx),
     approvalView(ctx),
   ]);
@@ -449,7 +577,7 @@ export async function loadDashboard(ctx: DashboardContext): Promise<Dashboard> {
     month: monthOf(ctx),
     money,
     tasks,
-    pipeline,
+    calendar,
     clients,
     approvals,
   };

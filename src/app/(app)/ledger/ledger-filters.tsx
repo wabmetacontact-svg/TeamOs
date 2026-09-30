@@ -92,7 +92,7 @@ export function LedgerFilters({
           type="checkbox"
           checked={params.get("mine") === "1"}
           onChange={(e) => apply({ mine: e.currentTarget.checked ? "1" : "" })}
-          className="size-4 accent-[var(--brand)]"
+          className="size-4 accent-brand"
         />
         Only mine
       </label>

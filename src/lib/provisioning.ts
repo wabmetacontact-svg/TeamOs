@@ -6,8 +6,7 @@ import { ALL_PERMISSIONS, DEFAULT_ROLES, permissionLabel, type PermissionKey } f
  * Bringing a new workspace into existence.
  *
  * A tenant row on its own is useless: no roles, so nobody can be granted
- * anything; no pipelines, so the relationship module has nowhere to put a
- * person; no categories, so every ledger entry is uncategorised. The first
+ * anything; no categories, so every ledger entry is uncategorised. The first
  * person through the door would find a working application that refuses to do
  * anything, and would leave.
  *
@@ -19,29 +18,6 @@ import { ALL_PERMISSIONS, DEFAULT_ROLES, permissionLabel, type PermissionKey } f
  * workspace's actual business, and guessing at them produces four rows called
  * "Brand 1" that everybody has to delete before they can start.
  */
-
-/** Pipelines almost every agency turns out to want, with usable stages. */
-const DEFAULT_CONTEXTS: { name: string; stages: { name: string; isTerminal?: boolean }[] }[] = [
-  {
-    name: "Sales",
-    stages: [
-      { name: "Lead" },
-      { name: "In conversation" },
-      { name: "Proposal sent" },
-      { name: "Won", isTerminal: true },
-      { name: "Lost", isTerminal: true },
-    ],
-  },
-  {
-    name: "Partnership",
-    stages: [
-      { name: "Introduced" },
-      { name: "Exploring" },
-      { name: "Agreed", isTerminal: true },
-      { name: "Passed", isTerminal: true },
-    ],
-  },
-];
 
 /** A starting chart of accounts. Two levels, because that is the limit. */
 const DEFAULT_CATEGORIES: { name: string; direction: "IN" | "OUT"; children?: string[] }[] = [
@@ -148,20 +124,6 @@ export async function provisionTenant(input: ProvisionInput): Promise<ProvisionR
       }
 
       if (!ownerRoleId) throw new Error("DEFAULT_ROLES no longer contains an Owner");
-
-      // ── pipelines
-      for (const [position, context] of DEFAULT_CONTEXTS.entries()) {
-        const created = await tx.context.create({ data: { tenantId, name: context.name, position } });
-        await tx.pipelineStage.createMany({
-          data: context.stages.map((stage, i) => ({
-            tenantId,
-            contextId: created.id,
-            name: stage.name,
-            position: i,
-            isTerminal: stage.isTerminal ?? false,
-          })),
-        });
-      }
 
       // ── categories, parents before children
       for (const category of DEFAULT_CATEGORIES) {

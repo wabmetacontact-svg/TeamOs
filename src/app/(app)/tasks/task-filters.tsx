@@ -92,7 +92,7 @@ export function TaskFilters({
           type="checkbox"
           checked={params.get("overdue") === "1"}
           onChange={(e) => apply({ overdue: e.currentTarget.checked ? "1" : "" })}
-          className="size-4 accent-[var(--brand)]"
+          className="size-4 accent-brand"
         />
         Overdue only
       </label>
