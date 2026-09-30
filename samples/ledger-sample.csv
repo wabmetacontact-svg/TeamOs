@@ -1,0 +1,10 @@
+Date,Particulars,Client,Expense Head,Amount,Currency,Rate,Type
+01/09/2026,Coworking desk,Northwind Labs,Rent,28000,INR,,Debit
+03/09/2026,"Sharma, Gupta & Co",Northwind Labs,Professional fees,12999,INR,,Debit
+05/09/2026,Figma seats,Kestrel Media,Software,"144.00",USD,84.10,Debit
+08/09/2026,Courier,Kestrel Media,Logistics,(650),INR,,Debit
+12/09/2026,Sponsorship received,Halcyon Retail,Sponsorship,175000,INR,,Credit
+15-Sep-2026,Studio hire,Pale Blue Studio,Production,36500,INR,,Debit
+18/09/2026,Laptop repair,Nonexistent Client,Hardware,9400,INR,,Debit
+20/09/2026,,Northwind Labs,Software,4230,INR,,Debit
+22/09/2026,Bad amount row,Northwind Labs,Software,not a number,INR,,Debit

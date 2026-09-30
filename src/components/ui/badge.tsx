@@ -1,6 +1,8 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
-import type { Tone } from "@/lib/constants";
+/** Colour carries status, never decoration: green is settled, orange is
+ *  waiting, red needs attention, blue is neutral emphasis. */
+export type Tone = "grey" | "blue" | "green" | "orange" | "red";
 
 const tones: Record<Tone, string> = {
   grey: "bg-slate-100 text-slate-600 ring-slate-200",

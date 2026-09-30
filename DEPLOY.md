@@ -38,13 +38,30 @@ AUTH_SECRET="…generate it with the command below…"
 node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 ```
 
-Create the tables, then your own account:
+Create the tables, the application role, then your own account:
 
 ```bash
 npx prisma migrate deploy
-npm run db:fresh -- --name "Samir" --email samirthakur024@gmail.com --password "your password"
-npm run dev        # check http://localhost:3000 and sign in
+npx tsx scripts/create-app-role.ts   # see the warning below — this is required
+npm run db:seed
+npm test                             # proves the tenant boundary actually holds
+npm run dev                          # http://localhost:3000
 ```
+
+> **The application must not connect as the database owner.**
+>
+> Neon's default role (`neondb_owner`) carries `BYPASSRLS`, which overrides even
+> `FORCE ROW LEVEL SECURITY`. Connect as that role and every isolation policy is
+> enabled, forced, correct — and completely inert. The Stage 0 test suite caught
+> exactly this.
+>
+> `scripts/create-app-role.ts` creates a `teamos_app` role with no BYPASSRLS and
+> no ownership, and rewrites your local `DATABASE_URL` to use it. Run it once per
+> database — local, staging and production each need their own.
+>
+> After running it, **copy the new `DATABASE_URL` from `.env` into your hosting
+> provider** and leave `DIRECT_URL` as the owner connection, which migrations
+> need. `npm test` fails loudly if this is ever wrong.
 
 ## 3. Push the code to GitHub
 
@@ -71,8 +88,8 @@ git push -u origin main
 
    | Name | Value |
    |---|---|
-   | `DATABASE_URL` | the pooled Neon string |
-   | `DIRECT_URL` | the direct Neon string |
+   | `DATABASE_URL` | the **app-role** pooled string from `.env` (starts `postgresql://teamos_app:…`) |
+   | `DIRECT_URL` | the owner direct string — migrations need it |
    | `AUTH_SECRET` | generate a **new** one with the command above |
 
 4. **Deploy**. You get a link like `https://teamos-xyz.vercel.app`.
@@ -97,3 +114,38 @@ Open the Vercel link, sign in with the account from step 2, then **Settings → 
 - **Custom domain:** Vercel → Project → Settings → Domains, e.g. `teamos.yourcompany.com`.
 - **Local and production now share one database.** When you want them separate, create a second branch in Neon and use its two strings in your local `.env`.
 - **If a deploy fails**, check the Vercel build log — nine times out of ten it's a missing or mistyped environment variable.
+
+## Receipts: object storage
+
+Attachments are optional. Without a bucket configured everything else works and
+the receipts panel says storage is not set up, rather than failing at the moment
+somebody tries to upload.
+
+It speaks the S3 API, so R2, B2, MinIO or AWS all work. **Cloudflare R2** is the
+one to pick on a free tier: 10 GB of storage free, and no charge for egress at
+all — for a pile of receipt PDFs, egress is the whole cost everywhere else.
+
+1. Cloudflare dashboard → R2 → **Create bucket**. Name it `teamos-receipts`.
+2. R2 → **Manage API tokens** → *Create API token*, permission **Object Read &
+   Write**, scoped to that one bucket.
+3. Copy the Access Key ID, the Secret Access Key, and the S3 endpoint — it looks
+   like `https://<account-id>.r2.cloudflarestorage.com`.
+4. Add four variables in Vercel → Settings → Environment Variables:
+
+```
+S3_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+S3_BUCKET=teamos-receipts
+S3_ACCESS_KEY_ID=…
+S3_SECRET_ACCESS_KEY=…
+```
+
+`S3_REGION` is optional and defaults to `auto`, which is what R2 wants.
+
+**Leave the bucket private.** Nothing needs public access: the browser uploads
+and downloads through presigned URLs that this application mints per request and
+that expire in five minutes. A public bucket would make every receipt readable
+by anyone who learns a key.
+
+Files go up from the browser straight to the bucket and never pass through the
+server — a 10 MB PDF routed through a serverless function spends that function's
+whole memory budget carrying bytes it does nothing with.
