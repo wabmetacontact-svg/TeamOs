@@ -3,12 +3,20 @@
 import { useActionState } from "react";
 import { AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Field, Input } from "@/components/ui/input";
+import { Field, Input, Select } from "@/components/ui/input";
 import { loginAction } from "./actions";
 
 export function LoginForm({ next }: { next: string }) {
   const [state, formAction, pending] = useActionState(loginAction, null);
   const errors = state && !state.ok ? state.fieldErrors : undefined;
+
+  // The action answers with the list only once the password is known to be
+  // right — asking before that would tell an outsider which addresses exist
+  // and where. Each entry is "tenantId:Display Name".
+  const workspaces = (errors?.workspace ?? []).map((entry) => {
+    const at = entry.indexOf(":");
+    return { id: entry.slice(0, at), name: entry.slice(at + 1) };
+  });
 
   return (
     <form action={formAction} className="grid gap-4">
@@ -25,8 +33,20 @@ export function LoginForm({ next }: { next: string }) {
       <Field label="Password" htmlFor="password" error={errors?.password?.[0]}>
         <Input id="password" name="password" type="password" autoComplete="current-password" placeholder="••••••••" required />
       </Field>
+      {workspaces.length > 0 && (
+        <Field label="Which workspace?" htmlFor="workspace" hint="This email belongs to more than one.">
+          <Select id="workspace" name="workspace" defaultValue={workspaces[0]?.id} required>
+            {workspaces.map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      )}
+
       <Button type="submit" variant="primary" size="lg" loading={pending} className="mt-1 w-full">
-        Sign in
+        {workspaces.length > 0 ? "Continue" : "Sign in"}
       </Button>
     </form>
   );

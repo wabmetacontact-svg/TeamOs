@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { LoginForm } from "./login-form";
 
 export const metadata: Metadata = { title: "Sign in" };
@@ -20,6 +21,13 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
         <p className="mb-6 mt-1 text-sm text-muted">Use the email your manager set up for you.</p>
 
         <LoginForm next={typeof next === "string" ? next : ""} />
+
+        <p className="mt-6 text-sm text-muted">
+          No workspace yet?{" "}
+          <Link href="/signup" className="font-medium text-brand hover:underline">
+            Create one
+          </Link>
+        </p>
       </div>
     </main>
   );
