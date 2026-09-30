@@ -1,170 +1,828 @@
-// TeamOS — one app: team tasks + company finance.
+// Unified Operations Platform — schema
 //
-// Two rules the whole schema follows:
-//   1. ONE central Transaction ledger. No monthly tables, no per-section copies.
-//      Salaries and client payments WRITE INTO it, they never keep their own money.
-//   2. Status-style fields are plain strings validated in src/lib/constants.ts
-//      rather than database enums, so the schema runs unchanged on Postgres
-//      (hosted) and SQLite (if you ever want a local file database again).
+// Designed once, with every module visible, per the System Architecture document.
+//
+// Four rules hold across every table here:
+//   1. TENANCY. Every tenant-owned table carries tenantId, has a foreign key to
+//      tenants, and is covered by a row-level security policy. A table missing
+//      any of the three fails the schema test in CI (see tests/schema.test.ts).
+//   2. MONEY. BigInt minor units plus a 3-letter currency code. Never a float.
+//      A transaction stores what was transacted AND the base amount, which is
+//      written once and never recomputed, so historical figures cannot move.
+//   3. HISTORY. audit_log is append-only at the database. Financial rows are
+//      soft-deleted; hard deletion is a separate permission.
+//   4. SCOPE. Access is per user per client (user_client_scope), enforced in the
+//      query, never in the interface.
+//
+// Deviations from the architecture document, deliberate and noted:
+//   - `transactions` rather than `expenses`: income is in scope, so the ledger
+//     carries a direction. One table, one set of totals.
+//   - Task recurrence lives on the task rather than in a separate rules table,
+//     because PRD §11 requires the next occurrence to be created on completion
+//     rather than generated in advance. The task IS the rule.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
-  // Pooled connection: what the running app uses.
+  provider  = "postgresql"
   url       = env("DATABASE_URL")
-  // Direct connection: migrations need a real session, which a pooler can't give.
   directUrl = env("DIRECT_URL")
 }
 
-model User {
-  id           String    @id @default(cuid())
-  email        String    @unique
-  passwordHash String
-  name         String
-  /// MANAGER = sees finance + everyone's tasks. MEMBER = own tasks only.
-  role         String    @default("MEMBER")
-  active       Boolean   @default(true)
-  phone        String?
-  designation  String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  lastLoginAt  DateTime?
+// ─────────────────────────────────────────────────────────────── tenancy ───
 
-  assignedTasks Task[]        @relation("TaskAssignee")
-  createdTasks  Task[]        @relation("TaskCreator")
-  verifiedTasks Task[]        @relation("TaskVerifier")
-  transactions  Transaction[] @relation("TransactionCreator")
+model Tenant {
+  id           String   @id @default(cuid())
+  name         String
+  slug         String   @unique
+  baseCurrency String   @default("INR")
+  timezone     String   @default("Asia/Kolkata")
+  status       String   @default("Active")
+  /// Per-tenant configuration: approval mode and threshold, feature switches.
+  settings     Json     @default("{}")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  users             User[]
+  roles             Role[]
+  rolePermissions   RolePermission[]
+  clientContacts    ClientContact[]
+  pipelineStages    PipelineStage[]
+  stageChanges      RelationshipStageChange[]
+  taskStatusChanges TaskStatusChange[]
+  brands            Brand[]
+  clients           Client[]
+  people            Person[]
+  contexts          Context[]
+  relationships     Relationship[]
+  activities        Activity[]
+  categories        Category[]
+  vendors           Vendor[]
+  transactions      Transaction[]
+  bookMonths        BookMonth[]
+  attachments       Attachment[]
+  tasks             Task[]
+  auditEntries      AuditEntry[]
+  notifications     Notification[]
+  invitations       Invitation[]
+  sessions          Session[]
+  scopeGrants       UserClientScope[]
+  contextGrants     UserContextScope[]
+  recurringSpends   RecurringSpend[]
+
+  @@map("tenants")
 }
 
-model Task {
+// ────────────────────────────────────────────────────────────────── rbac ───
+
+/// The permission catalogue. Global, not tenant-owned: the list of things that
+/// can be permitted is the same everywhere; who holds them is per tenant.
+model Permission {
+  id       String @id @default(cuid())
+  /// user, role, client, expense, dashboard, audit, settings…
+  resource String
+  /// view, create, edit, delete, approve, export…
+  action   String
+  /// "expense:approve" — what a route declares and a guard checks.
+  key      String @unique
+  label    String
+
+  roles RolePermission[]
+
+  @@unique([resource, action])
+  @@map("permissions")
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  /// Seeded defaults (Owner, Admin, Finance, Manager, Member). Editable, but
+  /// the last Owner-holding role cannot be stripped of owner permissions.
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  permissions RolePermission[]
+  users       User[]
+  invitations Invitation[]
+
+  @@unique([tenantId, name])
+  @@map("roles")
+}
+
+model RolePermission {
+  tenantId     String
+  tenant       Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  roleId       String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permissionId String
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([tenantId])
+  @@map("role_permissions")
+}
+
+model User {
+  id               String    @id @default(cuid())
+  tenantId         String
+  tenant           Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  email            String
+  passwordHash     String
+  name             String
+  roleId           String
+  role             Role      @relation(fields: [roleId], references: [id])
+  /// Active | Deactivated. Deactivating preserves attribution on their records.
+  status           String    @default("Active")
+  phone            String?
+  designation      String?
+  /// Empty scope + a role that allows it means all clients; see UserClientScope.
+  allClients       Boolean   @default(false)
+  /// The same idea one axis over. The investor pipeline is genuinely more
+  /// sensitive than the KOL pipeline, so context is scoped separately from
+  /// client rather than being inferred from it.
+  allContexts      Boolean   @default(true)
+  /// Base32, written when setup begins and only trusted once confirmed.
+  twoFactorSecret  String?
+  twoFactorEnabled Boolean   @default(false)
+  twoFactorAddedAt DateTime?
+  /// SHA-256 of each unused recovery code. Removed as they are spent.
+  twoFactorRecovery String[] @default([])
+  /// The last time step accepted, so a code cannot be replayed inside its life.
+  twoFactorLastStep Int?
+  /// Null until they have proved the address is theirs.
+  emailVerifiedAt  DateTime?
+  /// Which events reach them on which channel. Absent keys fall back to the
+  /// defaults in lib/notifications.ts, so a new event type is on for everyone
+  /// without a migration.
+  notificationPrefs Json     @default("{}")
+  lastLoginAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  scope                UserClientScope[]
+  contextScope         UserContextScope[]
+  sessions             Session[]
+  invitationsSent      Invitation[]              @relation("InvitedBy")
+  auditEntries         AuditEntry[]
+  notifications        Notification[]
+  assignedTasks        Task[]                    @relation("TaskAssignee")
+  assignedByTasks      Task[]                    @relation("TaskAssignedBy")
+  verifiedTasks        Task[]                    @relation("TaskVerifier")
+  taskStatusChanges    TaskStatusChange[]
+  ownedRelationships   Relationship[]            @relation("RelationshipOwner")
+  stageChanges         RelationshipStageChange[]
+  activities           Activity[]                @relation("ActivityActor")
+  createdTransactions  Transaction[]             @relation("TransactionCreatedBy")
+  approvedTransactions Transaction[]             @relation("TransactionApprovedBy")
+  closedMonths         BookMonth[]               @relation("BookMonthClosedBy")
+  uploads              Attachment[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@map("users")
+}
+
+/// Which clients a user may reach. No rows plus allClients=false means the user
+/// reaches nothing; allClients=true means every client in the tenant.
+model UserClientScope {
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  grantedAt DateTime @default(now())
+
+  @@id([userId, clientId])
+  @@index([tenantId])
+  @@map("user_client_scope")
+}
+
+/// Refresh-token families. Revoking a row ends that session on the next call.
+model Session {
+  id               String    @id @default(cuid())
+  tenantId         String
+  tenant           Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenHash String    @unique
+  /// Rotation family. Reuse of a rotated token invalidates the whole family.
+  family           String
+  userAgent        String?
+  ip               String?
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+
+  @@index([tenantId])
+  @@index([userId])
+  @@map("sessions")
+}
+
+model Invitation {
+  id          String    @id @default(cuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  email       String
+  name        String?
+  roleId      String
+  role        Role      @relation(fields: [roleId], references: [id])
+  allClients  Boolean   @default(false)
+  /// Client IDs granted on acceptance.
+  clientIds   String[]  @default([])
+  tokenHash   String    @unique
+  invitedById String
+  invitedBy   User      @relation("InvitedBy", fields: [invitedById], references: [id])
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([tenantId])
+  @@map("invitations")
+}
+
+// ────────────────────────────────────────────────────── clients & people ───
+
+/// Which pipelines a user may see, when allContexts is false. Same shape and
+/// same rules as UserClientScope; the two are separate axes on purpose.
+model UserContextScope {
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contextId String
+  context   Context  @relation(fields: [contextId], references: [id], onDelete: Cascade)
+  grantedAt DateTime @default(now())
+
+  @@id([userId, contextId])
+  @@index([tenantId])
+  @@map("user_context_scope")
+}
+
+/// A signup that has not been verified yet.
+///
+/// Deliberately NOT a tenant. If signing up created the workspace immediately,
+/// anyone could mint a thousand of them from addresses they do not own, and
+/// each one would be real rows across every tenant-owned table. Nothing exists
+/// until somebody proves they can read the email.
+///
+/// Not tenant-owned, so it carries no tenantId and sits outside row-level
+/// security — there is no tenant yet to isolate it to. The token hash is the
+/// only way to reach a row, exactly as with an invitation.
+model PendingSignup {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String
+  workspaceName String
+  passwordHash  String
+  tokenHash     String    @unique
+  /// Rate limiting and abuse review; not used for anything else.
+  ip            String?
+  userAgent     String?
+  expiresAt     DateTime
+  /// Set when the workspace is created, so a link cannot be replayed.
+  claimedAt     DateTime?
+  /// How many times the verification mail has been sent again.
+  resendCount   Int       @default(0)
+  lastSentAt    DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+
+  @@index([expiresAt])
+  @@map("pending_signups")
+}
+
+model Brand {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  color     String   @default("blue")
+  /// Typed field definitions for this brand's clients, validated in the app.
+  /// [{ key, label, type: text|number|date|select|multiselect|url, options? }]
+  fieldDefs Json     @default("[]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  clients    Client[]
+  categories Category[]
+  tasks      Task[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("brands")
+}
+
+model Client {
+  id              String    @id @default(cuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  brandId         String
+  brand           Brand     @relation(fields: [brandId], references: [id])
+  name            String
+  legalName       String?
+  /// ARC3 → Internal, ARC3 → Jay. Free text within a brand, not a fixed list.
+  subTag          String?
+  /// Active | Paused | Onboarding | Archived
+  status          String    @default("Onboarding")
+  billingCurrency String    @default("INR")
+  startDate       DateTime?
+  notes           String?
+  /// Values for the brand's fieldDefs.
+  customFields    Json      @default("{}")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  contacts        ClientContact[]
+  scopeGrants     UserClientScope[]
+  transactions    Transaction[]
+  bookMonths      BookMonth[]
+  tasks           Task[]
+  relationships   Relationship[]
+  recurringSpends RecurringSpend[]
+
+  @@index([tenantId])
+  @@index([brandId])
+  @@map("clients")
+}
+
+/// One master record per human. Duplicates are surfaced at entry, not blocked.
+model Person {
+  id        String    @id @default(cuid())
+  tenantId  String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  email     String?
+  phone     String?
+  /// [{ label, url }] — socials, website, docs.
+  links     Json      @default("[]")
+  notes     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  relationships Relationship[]
+  contacts      ClientContact[]
+  activities    Activity[]
+
+  @@index([tenantId])
+  @@map("people")
+}
+
+model ClientContact {
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  personId  String
+  person    Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
+  title     String?
+  isPrimary Boolean  @default(false)
+  addedAt   DateTime @default(now())
+
+  @@id([clientId, personId])
+  @@index([tenantId])
+  @@map("client_contacts")
+}
+
+// ───────────────────────────────────────────────────────── relationships ───
+
+/// Investor, KOL, AMA, Sales, Partnership, Media — each with its own pipeline.
+model Context {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  stages        PipelineStage[]
+  relationships Relationship[]
+  scopeGrants   UserContextScope[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("contexts")
+}
+
+model PipelineStage {
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contextId  String
+  context    Context  @relation(fields: [contextId], references: [id], onDelete: Cascade)
+  name       String
+  position   Int      @default(0)
+  /// Terminal stages end the pipeline; used for won/lost reporting.
+  isTerminal Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  relationships Relationship[]
+  movedFrom     RelationshipStageChange[] @relation("FromStage")
+  movedTo       RelationshipStageChange[] @relation("ToStage")
+
+  @@unique([contextId, name])
+  @@index([tenantId])
+  @@map("pipeline_stages")
+}
+
+/// A person in one context. One person may hold several relationships, but only
+/// one per context — the unique index is what guarantees that.
+model Relationship {
+  id        String         @id @default(cuid())
+  tenantId  String
+  tenant    Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  personId  String
+  person    Person         @relation(fields: [personId], references: [id], onDelete: Cascade)
+  contextId String
+  context   Context        @relation(fields: [contextId], references: [id])
+  stageId   String?
+  stage     PipelineStage? @relation(fields: [stageId], references: [id])
+  ownerId   String?
+  owner     User?          @relation("RelationshipOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  /// Optional link to a client, so an investor who is also a client resolves
+  /// to one person.
+  clientId  String?
+  client    Client?        @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  /// Deal or cheque size in minor units, when it is known.
+  value     BigInt?
+  currency  String         @default("INR")
+  notes     String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  deletedAt DateTime?
+
+  stageHistory RelationshipStageChange[]
+  activities   Activity[]
+  tasks        Task[]
+
+  @@unique([personId, contextId])
+  @@index([tenantId])
+  @@map("relationships")
+}
+
+model RelationshipStageChange {
+  id             String         @id @default(cuid())
+  tenantId       String
+  tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  relationshipId String
+  relationship   Relationship   @relation(fields: [relationshipId], references: [id], onDelete: Cascade)
+  fromStageId    String?
+  fromStage      PipelineStage? @relation("FromStage", fields: [fromStageId], references: [id])
+  toStageId      String
+  toStage        PipelineStage  @relation("ToStage", fields: [toStageId], references: [id])
+  actorId        String
+  actor          User           @relation(fields: [actorId], references: [id])
+  note           String?
+  createdAt      DateTime       @default(now())
+
+  @@index([relationshipId])
+  @@index([tenantId])
+  @@map("relationship_stage_changes")
+}
+
+model Activity {
+  id             String        @id @default(cuid())
+  tenantId       String
+  tenant         Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  personId       String
+  person         Person        @relation(fields: [personId], references: [id], onDelete: Cascade)
+  relationshipId String?
+  relationship   Relationship? @relation(fields: [relationshipId], references: [id], onDelete: SetNull)
+  /// Call | Meeting | Message | Note
+  type           String
+  subject        String
+  body           String?
+  occurredAt     DateTime
+  actorId        String
+  actor          User          @relation("ActivityActor", fields: [actorId], references: [id])
+  createdAt      DateTime      @default(now())
+
+  @@index([tenantId])
+  @@index([personId])
+  @@map("activities")
+}
+
+// ──────────────────────────────────────────────────────────────── money ───
+
+/// Two-level tree: a parent has no parentId, a subcategory points at one.
+model Category {
+  id        String     @id @default(cuid())
+  tenantId  String
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  parentId  String?
+  parent    Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children  Category[] @relation("CategoryTree")
+  /// IN for income sources, OUT for spend categories.
+  direction String     @default("OUT")
+  name      String
+  /// Optional per-brand default set.
+  brandId   String?
+  brand     Brand?     @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  color     String     @default("slate")
+  archived  Boolean    @default(false)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  transactions    Transaction[]
+  recurringSpends RecurringSpend[]
+
+  @@unique([tenantId, name, direction])
+  @@index([tenantId])
+  @@map("categories")
+}
+
+model Vendor {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  notes     String?
+  archived  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  transactions Transaction[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("vendors")
+}
+
+/// Per client per month. Closing it locks writes; a database trigger enforces
+/// that, so the application cannot be the only thing standing in the way.
+model BookMonth {
   id           String    @id @default(cuid())
-  name         String
-  assigneeId   String
-  assignee     User      @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: Cascade)
-  /// Not Started | In Review | Completed | Blocked
-  status       String    @default("Not Started")
-  dueDate      DateTime
-  completedAt  DateTime?
-  /// Completed date minus due date, never below zero. Null while incomplete.
-  daysLate     Int?
+  tenantId     String
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  clientId     String
+  client       Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  /// yyyy-MM
+  month        String
+  /// Open | Closed
+  state        String    @default("Open")
+  closedAt     DateTime?
+  closedById   String?
+  closedBy     User?     @relation("BookMonthClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
+  reopenReason String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([clientId, month])
+  @@index([tenantId])
+  @@map("book_months")
+}
+
+/// The ledger. Income and expenses in one table, separated by direction, so a
+/// month's net position is one query rather than two tables reconciled by hand.
+model Transaction {
+  id        String @id @default(cuid())
+  tenantId  String
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// TX-20260920-001
+  ref       String
+  /// IN (income received) or OUT (money spent).
+  direction String
+
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id])
+  /// yyyy-MM — the month this belongs to, independent of the transaction date.
+  bookMonth String
+  /// When it actually happened.
+  date      DateTime
+
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  vendorId   String?
+  vendor     Vendor?   @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  /// Payee for an expense, payer for income.
+  name       String
+
+  /// As transacted.
+  amountOriginal   BigInt
+  currencyOriginal String  @default("INR")
+  /// Captured at entry and stored — never recomputed from a later rate.
+  exchangeRate     Decimal @default(1) @db.Decimal(18, 8)
+  /// The tenant's base currency value. Every total is built from this column.
+  amountBase       BigInt
+
+  /// Bank | Card | UPI | Crypto | Cash | Other
+  paymentMethod String @default("Bank")
+  /// Paid | Pending | Overdue
+  paymentStatus String @default("Paid")
+
+  description String?
+  tags        String[] @default([])
+
+  /// Draft | Submitted | Approved | Rejected
+  approvalState    String    @default("Draft")
+  submittedAt      DateTime?
+  approvedById     String?
+  approvedBy       User?     @relation("TransactionApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt       DateTime?
+  rejectionReason  String?
+  /// Set when a historical row was imported without a real approval.
+  approvalInferred Boolean   @default(false)
+
+  createdById String
+  createdBy   User      @relation("TransactionCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  attachments Attachment[]
+
+  @@unique([tenantId, ref])
+  @@index([tenantId, bookMonth])
+  @@index([clientId])
+  @@index([date])
+  @@index([approvalState])
+  @@map("transactions")
+}
+
+/// Receipts and invoices. Bytes live in object storage; this is the metadata
+/// and the key used to mint a short-lived signed URL after a permission check.
+model Attachment {
+  id            String      @id @default(cuid())
+  tenantId      String
+  tenant        Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  storageKey    String
+  filename      String
+  contentType   String
+  sizeBytes     Int
+  uploadedById  String
+  uploadedBy    User        @relation(fields: [uploadedById], references: [id])
+  createdAt     DateTime    @default(now())
+
+  @@index([tenantId])
+  @@index([transactionId])
+  @@map("attachments")
+}
+
+/// Generates ledger rows on a schedule, into Draft, for review before they count.
+model RecurringSpend {
+  id         String    @id @default(cuid())
+  tenantId   String
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  clientId   String
+  client     Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  direction  String    @default("OUT")
+  name       String
+  amount     BigInt
+  currency   String    @default("INR")
+  /// Monthly only for now; the column keeps the door open.
+  frequency  String    @default("Monthly")
+  dayOfMonth Int       @default(1)
+  nextRunAt  DateTime
+  active     Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([tenantId])
+  @@map("recurring_spends")
+}
+
+// ──────────────────────────────────────────────────────────────── tasks ───
+
+model Task {
+  id             String        @id @default(cuid())
+  tenantId       String
+  tenant         Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name           String
+  assigneeId     String
+  assignee       User          @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  assignedById   String
+  assignedBy     User          @relation("TaskAssignedBy", fields: [assignedById], references: [id])
+  clientId       String?
+  client         Client?       @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  brandId        String?
+  brand          Brand?        @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  /// Work done against a relationship shows up in both places.
+  relationshipId String?
+  relationship   Relationship? @relation(fields: [relationshipId], references: [id], onDelete: SetNull)
+
+  /// Urgent | High | Medium | Low
+  priority String  @default("Medium")
+  category String?
+  /// Not Started | In Progress | In Review | Blocked | Completed
+  status   String  @default("Not Started")
+
+  /// The day the work is for; dueDate is when it must be finished.
+  taskDate         DateTime?
+  dueDate          DateTime
+  completedAt      DateTime?
+  /// Completed date minus due date, compared as dates in the tenant timezone.
+  daysLate         Int?
+  /// Required on creation and again on completion (PRD §Tasks).
+  estimatedMinutes Int
+  actualMinutes    Int?
+
+  notes     String?
+  docUrl    String?
+  /// Founder-level work, visible only to its owner.
+  isPrivate Boolean @default(false)
+
   verifiedById String?
   verifiedBy   User?     @relation("TaskVerifier", fields: [verifiedById], references: [id], onDelete: SetNull)
-  docUrl       String?
-  notes        String?
+  verifiedAt   DateTime?
 
-  // Recurrence: the NEXT occurrence is created only after this one completes.
+  // Recurrence. The next occurrence is created when this one completes — never
+  // a batch of future rows.
   recurring      Boolean   @default(false)
   /// Daily | Weekly
   frequency      String?
-  /// 0 = Sunday … 6 = Saturday (weekly only)
+  /// 0 = Sunday … 6 = Saturday, for weekly rules.
   weekday        Int?
   recurringStart DateTime?
   recurringEnd   DateTime?
   nextCreated    Boolean   @default(false)
 
-  createdById String
-  createdBy   User     @relation("TaskCreator", fields: [createdById], references: [id])
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
+  statusHistory TaskStatusChange[]
+
+  @@index([tenantId, status])
   @@index([assigneeId])
-  @@index([status])
-  @@index([dueDate])
-}
-
-model Client {
-  id            String   @id @default(cuid())
-  name          String
-  company       String?
-  contactPerson String?
-  email         String?
-  phone         String?
-  project       String?
-  /// Contract value in paise (₹1 = 100).
-  contractValue Int?
-  paymentTerms  String?
-  /// Active | Inactive
-  status        String   @default("Active")
-  notes         String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  transactions Transaction[]
-}
-
-model Category {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  /// EXPENSE (spend category) or INCOME (income source, e.g. ARC3)
-  kind      String   @default("EXPENSE")
-  color     String   @default("slate")
-  archived  Boolean  @default(false)
-  createdAt DateTime @default(now())
-
-  transactions Transaction[]
-}
-
-model Salary {
-  id           String    @id @default(cuid())
-  employeeName String
-  /// Monthly salary in paise.
-  amount       Int
-  /// The month this salary is for, as yyyy-MM (e.g. "2026-09").
-  month        String
-  paymentDate  DateTime?
-  /// Amount actually paid, in paise (supports Partially Paid).
-  amountPaid   Int       @default(0)
-  /// Pending | Paid | Partially Paid
-  status       String    @default("Pending")
-  notes        String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-
-  /// The expense this salary created in the ledger. One salary, one transaction.
-  transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
-  transactionId String?      @unique
-
-  @@index([month])
-}
-
-/// The central ledger. Every rupee in or out of the business is one row here.
-model Transaction {
-  id   String   @id @default(cuid())
-  /// Human reference shown in the UI, e.g. TX-20260920-001.
-  ref  String   @unique
-  /// INCOME | EXPENSE
-  type String
-  date DateTime
-
-  categoryId String?
-  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  /// Payee for an expense, payer/source for income.
-  name       String
-  clientId   String?
-  client     Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
-
-  /// Crypto leg, when income arrives in USDT.
-  usdt Float?
-  rate Float?
-  /// Always the INR value in paise — the only number totals are built from.
-  amount Int
-
-  /// Received | Pending | Paid
-  status String  @default("Received")
-  notes  String?
-
-  /// Set when this row was generated by a salary, so nothing is double counted.
-  salary Salary?
-
-  createdById String
-  createdBy   User     @relation("TransactionCreator", fields: [createdById], references: [id])
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@index([date])
-  @@index([type])
   @@index([clientId])
+  @@index([dueDate])
+  @@map("tasks")
+}
+
+model TaskStatusChange {
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  taskId     String
+  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  fromStatus String?
+  toStatus   String
+  actorId    String
+  actor      User     @relation(fields: [actorId], references: [id])
+  createdAt  DateTime @default(now())
+
+  @@index([taskId])
+  @@index([tenantId])
+  @@map("task_status_changes")
+}
+
+// ──────────────────────────────────────────────────────── cross-cutting ───
+
+/// Append-only. The application role holds no UPDATE or DELETE grant on this
+/// table — that is enforced in a migration, not by convention.
+model AuditEntry {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  actorId       String?
+  actor         User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  /// created | updated | deleted | approved | closed | logged_in | …
+  action        String
+  resourceType  String
+  resourceId    String
+  resourceLabel String?
+  before        Json?
+  after         Json?
+  ip            String?
+  requestId     String?
+  createdAt     DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([resourceType, resourceId])
+  @@map("audit_log")
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  tenantId  String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// expense.submitted | expense.approved | month.closed | user.invited | …
+  event     String
+  title     String
+  body      String?
+  link      String?
+  /// in_app | email | whatsapp
+  channel   String    @default("in_app")
+  /// queued | sent | failed
+  status    String    @default("queued")
+  attempts  Int       @default(0)
+  sentAt    DateTime?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([tenantId])
+  @@index([userId, readAt])
+  @@map("notifications")
 }

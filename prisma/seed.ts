@@ -1,163 +1,171 @@
+/**
+ * Seeds a tenant with everything it needs to be usable: the permission
+ * catalogue, the five default roles, brands, relationship contexts with their
+ * pipelines, and a starting category tree.
+ *
+ * Safe to re-run. It never deletes: existing rows are left alone, missing ones
+ * are created. Users already present keep their password and their role.
+ *
+ * If backup/pre-platform-*.json exists, the accounts in it are restored with
+ * their original password hashes, so nobody has to be handed a new password.
+ */
 import { PrismaClient } from "@prisma/client";
-import bcrypt from "bcryptjs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { ALL_PERMISSIONS, DEFAULT_ROLES, permissionLabel } from "../src/lib/permissions";
 
 const db = new PrismaClient();
 
-const day = (offset: number) => {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() + offset);
-  return d;
+const TENANT = { name: "Hephaestus", slug: "hephaestus" };
+const BRANDS = ["Cubane", "ARC3", "LineUp", "Hypergravity"];
+
+const CONTEXTS: Record<string, { name: string; terminal?: boolean }[]> = {
+  Investor: [{ name: "Contacted" }, { name: "Interested" }, { name: "Diligence" }, { name: "Committed", terminal: true }, { name: "Passed", terminal: true }],
+  KOL: [{ name: "Contacted" }, { name: "Negotiating" }, { name: "Active" }, { name: "Ended", terminal: true }],
+  AMA: [{ name: "Requested" }, { name: "Scheduled" }, { name: "Done", terminal: true }],
+  Sales: [{ name: "Lead" }, { name: "Qualified" }, { name: "Proposal" }, { name: "Won", terminal: true }, { name: "Lost", terminal: true }],
+  Partnership: [{ name: "Intro" }, { name: "Discussing" }, { name: "Agreed" }, { name: "Live" }, { name: "Ended", terminal: true }],
+  Media: [{ name: "Pitched" }, { name: "Scheduled" }, { name: "Published", terminal: true }],
 };
 
-const monthOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-const rupees = (amount: number) => amount * 100;
+const SPEND_CATEGORIES = [
+  "Salary", "Software", "Cloud & Hosting", "Marketing", "Advertising", "Travel",
+  "Food", "Office", "Rent", "Utilities", "Legal", "Consulting", "Equipment", "Taxes", "Other",
+];
+const INCOME_CATEGORIES = ["Client Payment", "Retainer", "Consulting", "Other Income"];
+
+/** The most recent pre-platform backup, if one was taken. */
+function loadBackup(): { users: { email: string; name: string; passwordHash: string; createdAt: string; phone?: string | null; designation?: string | null }[] } | null {
+  try {
+    const dir = join(process.cwd(), "backup");
+    const file = readdirSync(dir).filter((f) => f.startsWith("pre-platform-") && f.endsWith(".json")).sort().pop();
+    if (!file) return null;
+    return JSON.parse(readFileSync(join(dir, file), "utf8"));
+  } catch {
+    return null;
+  }
+}
 
 async function main() {
-  // Idempotent: wipe and rebuild the demo workspace.
-  await db.salary.deleteMany();
-  await db.transaction.deleteMany();
-  await db.task.deleteMany();
-  await db.client.deleteMany();
-  await db.category.deleteMany();
-  await db.user.deleteMany();
-
-  const passwordHash = await bcrypt.hash("password123", 10);
-  const people = [
-    { email: "jitesh@teamos.dev", name: "Jitesh", role: "MANAGER", designation: "Founder" },
-    { email: "jasleen@teamos.dev", name: "Jasleen", role: "MANAGER", designation: "Operations Lead" },
-    { email: "rahul@teamos.dev", name: "Rahul", role: "MEMBER", designation: "Strategy" },
-    { email: "priya@teamos.dev", name: "Priya", role: "MEMBER", designation: "Marketing" },
-    { email: "meyhar@teamos.dev", name: "Meyhar", role: "MEMBER", designation: "Developer" },
-  ];
-
-  const users: Record<string, string> = {};
-  for (const p of people) {
-    const user = await db.user.create({ data: { ...p, passwordHash } });
-    users[p.name] = user.id;
-  }
-  const { Jitesh, Jasleen, Rahul, Priya, Meyhar } = users as Record<string, string>;
-
-  // ---------------------------------------------------------------- tasks --
-  const tasks = [
-    { name: "Complete the $0.80 strategy", assigneeId: Rahul!, status: "Not Started", dueDate: day(0), recurring: true, frequency: "Daily", notes: "Daily strategy run." },
-    { name: "Post client on LinkedIn and X", assigneeId: Priya!, status: "In Review", dueDate: day(-1), recurring: true, frequency: "Weekly", weekday: day(-1).getDay(), notes: "Weekly client post." },
-    { name: "Prepare investor update", assigneeId: Jasleen!, status: "Completed", dueDate: day(-5), completedAt: day(-2), daysLate: 3, verifiedById: Jitesh!, docUrl: "https://docs.google.com/document/d/example", notes: "Shared with the board." },
-    { name: "Fix payout reconciliation bug", assigneeId: Meyhar!, status: "Blocked", dueDate: day(-3), notes: "Waiting on bank API access." },
-    { name: "Publish September case study", assigneeId: Priya!, status: "Not Started", dueDate: day(4) },
-    { name: "Review vendor contracts", assigneeId: Jasleen!, status: "Completed", dueDate: day(-8), completedAt: day(-8), daysLate: 0, verifiedById: Jitesh! },
-    { name: "Ship analytics dashboard", assigneeId: Meyhar!, status: "In Review", dueDate: day(1), docUrl: "https://github.com/example/pull/42" },
-    { name: "Daily standup notes", assigneeId: Rahul!, status: "Completed", dueDate: day(-1), completedAt: day(-1), daysLate: 0, recurring: true, frequency: "Daily", nextCreated: true },
-    { name: "Daily standup notes", assigneeId: Rahul!, status: "Not Started", dueDate: day(0), recurring: true, frequency: "Daily" },
-  ];
-
-  for (const t of tasks) {
-    await db.task.create({
-      data: {
-        ...t,
-        recurringStart: t.recurring ? t.dueDate : null,
-        createdById: Jitesh!,
-      },
+  // 1. The permission catalogue — global, outside tenancy.
+  for (const key of ALL_PERMISSIONS) {
+    const [resource, action] = key.split(":") as [string, string];
+    await db.permission.upsert({
+      where: { key },
+      update: { label: permissionLabel(key) },
+      create: { key, resource, action, label: permissionLabel(key) },
     });
   }
+  const permissions = await db.permission.findMany();
+  const permissionId = new Map(permissions.map((p) => [p.key, p.id]));
+  console.log(`permissions: ${permissions.length}`);
 
-  // ----------------------------------------------------------- categories --
-  const expenseNames = ["Salary", "Food", "Travel", "Shopping", "Rent", "Utilities", "Software", "Marketing", "Operations", "Office", "Taxes", "Other"];
-  const colors = ["violet", "orange", "blue", "teal", "amber", "green", "red", "slate"];
-  const categories: Record<string, string> = {};
-  for (const [i, name] of expenseNames.entries()) {
-    const c = await db.category.create({ data: { name, kind: "EXPENSE", color: colors[i % colors.length]! } });
-    categories[name] = c.id;
-  }
-  const arc3 = await db.category.create({ data: { name: "ARC3", kind: "INCOME", color: "green" } });
-
-  // -------------------------------------------------------------- clients --
-  const client = await db.client.create({
-    data: {
-      name: "ARC3",
-      company: "ARC3",
-      contactPerson: "Daniel",
-      email: "accounts@arc3.example",
-      project: "Consulting",
-      contractValue: rupees(500000),
-      paymentTerms: "Monthly",
-      status: "Active",
-    },
+  // 2. The tenant — also outside tenancy, it is the root.
+  const tenant = await db.tenant.upsert({
+    where: { slug: TENANT.slug },
+    update: {},
+    create: { ...TENANT, settings: { approvalMode: "off", approvalThreshold: 0 } },
   });
-  const secondClient = await db.client.create({
-    data: { name: "Nova Labs", company: "Nova Labs Pvt Ltd", project: "Retainer", contractValue: rupees(240000), paymentTerms: "Monthly", status: "Active" },
-  });
+  console.log(`tenant: ${tenant.name} (${tenant.id})`);
 
-  // ---------------------------------------------------------- transactions --
-  let seq = 0;
-  const ref = (d: Date) => {
-    seq++;
-    const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
-    return `TX-${stamp}-${String(seq).padStart(3, "0")}`;
-  };
+  // 3. Everything else is tenant-owned, so row-level security applies and the
+  //    transaction must say which tenant it is acting as.
+  // A generous timeout: this is many small statements against a remote
+  // database, and the default five seconds is not enough over the wire.
+  await db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenant.id}, TRUE)`;
 
-  const entries = [
-    { type: "INCOME", date: day(-20), name: "ARC3", categoryId: arc3.id, clientId: client.id, usdt: 1000, rate: 100, amount: rupees(100000), status: "Received", notes: "September payment" },
-    { type: "INCOME", date: day(-3), name: "ARC3", categoryId: arc3.id, clientId: client.id, usdt: 1500, rate: 91.5, amount: rupees(137250), status: "Received", notes: "Milestone 2" },
-    { type: "INCOME", date: day(2), name: "Nova Labs", categoryId: arc3.id, clientId: secondClient.id, amount: rupees(60000), status: "Pending", notes: "Invoice sent" },
-    { type: "EXPENSE", date: day(-18), name: "Landlord", categoryId: categories.Rent!, amount: rupees(40000), status: "Paid", notes: "Office rent" },
-    { type: "EXPENSE", date: day(-14), name: "AWS", categoryId: categories.Software!, amount: rupees(18500), status: "Paid" },
-    { type: "EXPENSE", date: day(-9), name: "Swiggy", categoryId: categories.Food!, amount: rupees(800), status: "Paid", notes: "Team lunch" },
-    { type: "EXPENSE", date: day(-7), name: "Google Ads", categoryId: categories.Marketing!, amount: rupees(25000), status: "Paid" },
-    { type: "EXPENSE", date: day(-6), name: "Uber", categoryId: categories.Travel!, amount: rupees(1450), status: "Paid", notes: "Client meeting" },
-    { type: "EXPENSE", date: day(-2), name: "Airtel", categoryId: categories.Utilities!, amount: rupees(2600), status: "Paid" },
-  ];
+    // Roles and their permission sets.
+    const roleId = new Map<string, string>();
+    for (const def of DEFAULT_ROLES) {
+      const role = await tx.role.upsert({
+        where: { tenantId_name: { tenantId: tenant.id, name: def.name } },
+        update: { description: def.description },
+        create: { tenantId: tenant.id, name: def.name, description: def.description, isSystem: true },
+      });
+      roleId.set(def.name, role.id);
 
-  for (const e of entries) {
-    await db.transaction.create({ data: { ...e, ref: ref(e.date), createdById: Jitesh! } });
-  }
+      const keys = def.permissions === "all" ? ALL_PERMISSIONS : def.permissions;
+      await tx.rolePermission.createMany({
+        data: keys.map((key) => ({ tenantId: tenant.id, roleId: role.id, permissionId: permissionId.get(key)! })),
+        skipDuplicates: true,
+      });
+    }
+    console.log(`roles: ${[...roleId.keys()].join(", ")}`);
 
-  // ------------------------------------------------------------- salaries --
-  const thisMonth = monthOf(new Date());
-  const salaryPeople = [
-    { employeeName: "Jasleen", amount: rupees(30000), status: "Paid" },
-    { employeeName: "Rahul", amount: rupees(35000), status: "Paid" },
-    { employeeName: "Priya", amount: rupees(25000), status: "Pending" },
-    { employeeName: "Meyhar", amount: rupees(30000), status: "Partially Paid", amountPaid: rupees(15000) },
-  ];
+    // Brands.
+    for (const name of BRANDS) {
+      await tx.brand.upsert({
+        where: { tenantId_name: { tenantId: tenant.id, name } },
+        update: {},
+        create: { tenantId: tenant.id, name },
+      });
+    }
+    console.log(`brands: ${BRANDS.join(", ")}`);
 
-  for (const s of salaryPeople) {
-    const paid = s.status === "Paid" ? s.amount : (s.amountPaid ?? 0);
-    const paymentDate = s.status === "Pending" ? null : day(-4);
-    const salary = await db.salary.create({
-      data: {
-        employeeName: s.employeeName,
-        amount: s.amount,
-        month: thisMonth,
-        status: s.status,
-        amountPaid: paid,
-        paymentDate,
-        notes: `${thisMonth} salary`,
-      },
-    });
+    // Relationship contexts and their pipelines.
+    for (const [position, [name, stages]] of Object.entries(CONTEXTS).entries()) {
+      const context = await tx.context.upsert({
+        where: { tenantId_name: { tenantId: tenant.id, name } },
+        update: {},
+        create: { tenantId: tenant.id, name, position },
+      });
+      for (const [i, stage] of stages.entries()) {
+        await tx.pipelineStage.upsert({
+          where: { contextId_name: { contextId: context.id, name: stage.name } },
+          update: {},
+          create: { tenantId: tenant.id, contextId: context.id, name: stage.name, position: i, isTerminal: !!stage.terminal },
+        });
+      }
+    }
+    console.log(`contexts: ${Object.keys(CONTEXTS).join(", ")}`);
 
-    // Salaries always post into the ledger, exactly like the app does.
-    if (paid > 0 && paymentDate) {
-      const tx = await db.transaction.create({
-        data: {
-          ref: ref(paymentDate),
-          type: "EXPENSE",
-          date: paymentDate,
-          categoryId: categories.Salary!,
-          name: s.employeeName,
-          amount: paid,
-          status: "Paid",
-          notes: `${s.employeeName} — salary for ${thisMonth}`,
-          createdById: Jitesh!,
+    // Category tree.
+    for (const name of SPEND_CATEGORIES) {
+      await tx.category.upsert({
+        where: { tenantId_name_direction: { tenantId: tenant.id, name, direction: "OUT" } },
+        update: {},
+        create: { tenantId: tenant.id, name, direction: "OUT" },
+      });
+    }
+    for (const name of INCOME_CATEGORIES) {
+      await tx.category.upsert({
+        where: { tenantId_name_direction: { tenantId: tenant.id, name, direction: "IN" } },
+        update: {},
+        create: { tenantId: tenant.id, name, direction: "IN", color: "green" },
+      });
+    }
+    console.log(`categories: ${SPEND_CATEGORIES.length} spend, ${INCOME_CATEGORIES.length} income`);
+
+    // Restore the accounts that existed before the platform schema. The first
+    // account created becomes Owner; the rest become Admin, which is the same
+    // reach they had under the old two-role model.
+    const backup = loadBackup();
+    if (!backup?.users?.length) {
+      console.log("no backup found — create the first Owner with: npm run db:owner");
+      return;
+    }
+
+    const byAge = [...backup.users].sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
+    for (const [i, u] of byAge.entries()) {
+      const role = i === 0 ? "Owner" : "Admin";
+      await tx.user.upsert({
+        where: { tenantId_email: { tenantId: tenant.id, email: u.email } },
+        update: {},
+        create: {
+          tenantId: tenant.id,
+          email: u.email,
+          name: u.name,
+          passwordHash: u.passwordHash,
+          roleId: roleId.get(role)!,
+          allClients: true,
+          phone: u.phone ?? null,
+          designation: u.designation ?? null,
         },
       });
-      await db.salary.update({ where: { id: salary.id }, data: { transactionId: tx.id } });
+      console.log(`  ${u.email} → ${role} (existing password kept)`);
     }
-  }
-
-  console.log("Seeded 5 users, 9 tasks, 2 clients, 13 transactions, 4 salaries.");
-  console.log("Manager login: jitesh@teamos.dev / password123");
-  console.log("Member login:  rahul@teamos.dev / password123");
+  }, { timeout: 120_000, maxWait: 20_000 });
 }
 
 main()
