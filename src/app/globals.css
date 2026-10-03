@@ -1,82 +1,133 @@
 @import "tailwindcss";
 
-/* Light only, by design: white workspace, blue accent, colour used for status. */
+/*
+ * The Operations Platform palette: an indigo accent, slate neutrals, and
+ * colour kept for meaning — green settled, red needs attention, amber
+ * waiting, blue in progress.
+ *
+ * Font weights go through --fw-body and --fw-strong and nowhere else, so the
+ * whole interface can be made lighter or heavier from one place.
+ */
 :root {
-  --bg: #f6f7f9;
-  --surface: #ffffff;
-  --surface-2: #f8fafc;
-  --surface-hover: #f1f5f9;
-  --border: #e5e7eb;
-  --border-strong: #d1d5db;
-  --fg: #111827;
-  --fg-muted: #6b7280;
-  --fg-subtle: #9ca3af;
-  --blue: #2563eb;
-  --blue-hover: #1d4ed8;
-  --blue-soft: #eff6ff;
-  --green: #16a34a;
-  --green-soft: #ecfdf5;
-  --orange: #ea580c;
-  --orange-soft: #fff7ed;
-  --red: #dc2626;
-  --red-soft: #fef2f2;
-  --shadow-card: 0 1px 2px rgb(16 24 40 / 0.05);
-  --shadow-pop: 0 12px 40px -12px rgb(16 24 40 / 0.25);
+  --fw-body: 400;
+  --fw-strong: 500;
 }
 
 @theme inline {
-  --color-bg: var(--bg);
-  --color-surface: var(--surface);
-  --color-surface-2: var(--surface-2);
-  --color-surface-hover: var(--surface-hover);
-  --color-border: var(--border);
-  --color-border-strong: var(--border-strong);
-  --color-fg: var(--fg);
-  --color-muted: var(--fg-muted);
-  --color-subtle: var(--fg-subtle);
-  --color-brand: var(--blue);
-  --color-brand-hover: var(--blue-hover);
-  --color-brand-soft: var(--blue-soft);
-  --shadow-card: var(--shadow-card);
-  --shadow-pop: var(--shadow-pop);
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: var(--font-jakarta), system-ui, sans-serif;
 
-  --animate-in: enter 140ms ease-out;
-  --animate-fade: fade 140ms ease-out;
+  --color-ink: #0f172a;
+  --color-ink2: #111827;
+  --color-ink3: #334155;
+  --color-mute: #64748b;
+  --color-mute2: #475569;
+  --color-faint: #94a3b8;
+  --color-canvas: #f7f8fa;
+  --color-tint: #f8fafc;
+  --color-tint2: #f1f5f9;
+  --color-edge: #e5e7eb;
+  --color-edge2: #e2e8f0;
+  --color-edge3: #cbd5e1;
+  --color-line: rgb(100 116 139 / 0.2);
+  --color-line2: rgb(100 116 139 / 0.3);
+  --color-line3: rgb(100 116 139 / 0.12);
+  --color-accent: #5b5bd6;
+  --color-accent-h: #4c4cc4;
+  --color-accent-d: #3f3fb0;
+  --color-accent-l: #a5a6f6;
+  --color-accent-s: #eef0ff;
+  --color-indigo: #4338ca;
+  --color-good: #16a34a;
+  --color-good-d: #15803d;
+  --color-good-s: #dcfce7;
+  --color-bad: #dc2626;
+  --color-bad-d: #b91c1c;
+  --color-bad-s: #fee2e2;
+  --color-warn: #d97706;
+  --color-warn-d: #b45309;
+  --color-warn-s: #fef3c7;
+  --color-info: #2563eb;
+  --color-info-d: #1d4ed8;
+  --color-info-s: #eff6ff;
 
-  @keyframes enter {
-    from { opacity: 0; transform: translateY(6px) scale(0.99); }
-    to { opacity: 1; transform: none; }
-  }
-  @keyframes fade {
-    from { opacity: 0; }
-    to { opacity: 1; }
+  --breakpoint-wide: 860px;
+
+  --animate-rise: rise 200ms ease;
+  --animate-rise-slow: rise 360ms ease;
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
   }
 }
 
 @layer base {
-  * {
-    border-color: var(--border);
-  }
-  html {
-    -webkit-font-smoothing: antialiased;
-    color-scheme: light;
-  }
+  html,
   body {
-    background: var(--bg);
-    color: var(--fg);
+    margin: 0;
+    padding: 0;
+    background: #fff;
+    color: var(--color-ink);
+    -webkit-font-smoothing: antialiased;
+    font-weight: var(--fw-body);
   }
-  :focus-visible {
-    outline: 2px solid var(--blue);
+  h1,
+  h2,
+  h3,
+  strong,
+  b,
+  th {
+    font-weight: var(--fw-strong);
+  }
+  a {
+    color: var(--color-accent);
+    text-decoration: none;
+  }
+  a:hover {
+    color: var(--color-accent-d);
+    text-decoration: underline;
+  }
+  button,
+  input,
+  select,
+  textarea {
+    font-family: inherit;
+    font-size: inherit;
+    color: inherit;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: default;
+  }
+  input:focus,
+  select:focus,
+  textarea:focus,
+  button:focus-visible {
+    outline: 3px solid rgb(91 91 214 / 0.35);
     outline-offset: 1px;
   }
 }
 
-@layer utilities {
-  .tabular {
-    font-variant-numeric: tabular-nums;
-  }
-  .scrollbar-thin {
-    scrollbar-width: thin;
-  }
+@utility fw-s {
+  font-weight: var(--fw-strong);
+}
+@utility fw-b {
+  font-weight: var(--fw-body);
+}
+@utility tnum {
+  font-variant-numeric: tabular-nums;
+}
+@utility ellipsis {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

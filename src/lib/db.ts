@@ -50,11 +50,12 @@ export type TenantClient = ReturnType<typeof tenantDb>;
 export async function tenantTransaction<T>(
   tenantId: string,
   fn: (tx: Omit<PrismaClient, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">) => Promise<T>,
+  options?: { timeout?: number; maxWait?: number },
 ): Promise<T> {
   return db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, TRUE)`;
     return fn(tx);
-  });
+  }, options);
 }
 
 /**

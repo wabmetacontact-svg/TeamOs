@@ -54,9 +54,13 @@ async function main() {
   ];
   for (const sql of grants) await db.$executeRawUnsafe(sql);
 
-  // The audit log stays append-only for this role too: the trigger enforces it,
-  // but removing the grants means it cannot even be attempted.
+  // The audit log is append-only for the application: without these grants an
+  // edit or a deletion cannot even be attempted.
   await db.$executeRawUnsafe(`REVOKE UPDATE, DELETE ON "audit_log" FROM ${ROLE}`);
+
+  // Signing in reads through this one SECURITY DEFINER function; see the
+  // migration for why it exists.
+  await db.$executeRawUnsafe(`GRANT EXECUTE ON FUNCTION auth_tenants_for_email(TEXT) TO ${ROLE}`);
 
   const verify = await db.$queryRaw<{ rolbypassrls: boolean }[]>`
     SELECT rolbypassrls FROM pg_roles WHERE rolname = ${ROLE}
