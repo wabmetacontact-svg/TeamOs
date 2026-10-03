@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { PRESETS, isTeamAdmin } from "@/lib/access";
+import { hashPassword, verifyPassword } from "@/lib/auth";
 import { dayDiff, readAmount } from "@/lib/format";
 import { EMPLOYMENT_TYPES, HR_STATUSES, LEAVE_TYPES } from "@/lib/labels";
 import { LINK_TTL_DAYS, linkUrl, newToken } from "@/lib/links";
@@ -172,6 +173,111 @@ export async function setTaskBoards(raw: { id: string; deptIds: string[] }): Pro
     await ctx.tx.member.update({ where: { id }, data: { taskDeptIds: valid } });
     await outMember(ctx, id);
     await ctx.log({ kind: "access", text: `changed task boards for ${m.name}`, target: "Tasks", area: "tasks", from: name(m.taskDeptIds), to: name(valid) });
+  });
+}
+
+/**
+ * Taking somebody off the team.
+ *
+ * Somebody added by mistake is deleted outright. Somebody who has already done
+ * work is not: their name is on tasks, on money and in the audit trail, and
+ * erasing the person would leave all of it unattributed. They are marked
+ * Exited instead, which ends their access and keeps the history honest.
+ */
+export async function removeMember(id: string): Promise<Result> {
+  return mutate(async (ctx) => {
+    if (!isTeamAdmin(ctx.person)) ctx.fail("Only an owner or someone with Edit on Team can remove people.");
+    const m = await memberOf(ctx, id);
+    if (m.id === ctx.me.id) ctx.fail("You cannot remove yourself.");
+    if (m.isOwner) {
+      if (!ctx.person.isOwner) ctx.fail("Only an owner can remove another owner.");
+      const owners = await ctx.tx.member.count({ where: { isOwner: true, hrStatus: { not: "Exited" } } });
+      if (owners <= 1) ctx.fail("This is the last owner. Make somebody else an owner first.");
+    }
+
+    const [tasks, notes, changes, series, ledger] = await Promise.all([
+      ctx.tx.task.count({ where: { OR: [{ assigneeId: id }, { assignedById: id }] } }),
+      ctx.tx.taskNote.count({ where: { byId: id } }),
+      ctx.tx.taskStatusChange.count({ where: { byId: id } }),
+      ctx.tx.taskSeries.count({ where: { OR: [{ assigneeId: id }, { createdById: id }] } }),
+      ctx.tx.ledgerEntry.count({ where: { createdById: id } }),
+    ]);
+    const attached = [
+      tasks && `${tasks} ${tasks === 1 ? "task" : "tasks"}`,
+      series && `${series} recurring ${series === 1 ? "task" : "tasks"}`,
+      ledger && `${ledger} ledger ${ledger === 1 ? "entry" : "entries"}`,
+      notes + changes && "task history",
+    ].filter(Boolean) as string[];
+
+    if (attached.length) {
+      ctx.fail(
+        `${m.name} is on ${attached.join(", ")}. Deleting them would leave that work unattributed — set their status to Exited instead, which ends their access and keeps their name on what they did.`,
+      );
+    }
+
+    // Sessions, login links, grants and leave go with them; nothing else points here.
+    await ctx.tx.member.delete({ where: { id } });
+    ctx.remove("members", [id]);
+    await ctx.log({ kind: "team", text: `removed ${m.name} from the team`, target: "Team", area: "team", from: m.title, to: "Removed" });
+    return `${m.name} removed.`;
+  });
+}
+
+/**
+ * Setting a password.
+ *
+ * An owner or team admin can set somebody else's — useful when there is no
+ * mail server and a link is awkward. Changing your own needs the current one,
+ * so a borrowed laptop cannot lock you out of your own workspace.
+ *
+ * Either way every other session for that person ends, and any login link
+ * waiting to be used stops working.
+ */
+export async function setMemberPassword(raw: { memberId: string; current?: string; password: string; confirm: string }): Promise<Result> {
+  return mutate(async (ctx) => {
+    const f = parse(
+      ctx,
+      z.object({
+        memberId: ID,
+        current: z.string().default(""),
+        password: z.string().min(8, "Use at least 8 characters."),
+        confirm: z.string(),
+      }),
+      raw,
+    );
+    if (f.confirm !== f.password) ctx.fail("Passwords do not match.", { confirm: "Passwords do not match." });
+
+    const m = await memberOf(ctx, f.memberId);
+    const self = m.id === ctx.me.id;
+
+    if (self) {
+      if (!ctx.me.passwordHash || !(await verifyPassword(ctx.me.passwordHash, f.current))) {
+        ctx.fail("That is not your current password.", { current: "That is not your current password." });
+      }
+    } else {
+      if (!isTeamAdmin(ctx.person)) ctx.fail("Only an owner or someone with Edit on Team can set a password.");
+      if (m.isOwner && !ctx.person.isOwner) ctx.fail("Only an owner can set another owner's password.");
+      if (m.hrStatus === "Exited") ctx.fail(`${m.name} has exited. Change their status first.`);
+      if (!m.email) ctx.fail(`Add an email for ${m.name} first. It is what they log in with.`);
+    }
+
+    await ctx.tx.member.update({ where: { id: m.id }, data: { passwordHash: await hashPassword(f.password) } });
+    await ctx.tx.loginLink.updateMany({ where: { memberId: m.id, usedAt: null }, data: { expiresAt: new Date() } });
+    // Every other session ends; the one doing this keeps going.
+    await ctx.tx.session.updateMany({
+      where: { memberId: m.id, revokedAt: null, ...(self ? { id: { not: ctx.signed.sessionId } } : {}) },
+      data: { revokedAt: new Date() },
+    });
+
+    await outMember(ctx, m.id);
+    await ctx.log({
+      kind: "team",
+      text: self ? "changed their own password" : `set a new password for ${m.name}`,
+      target: "Team",
+      area: "team",
+      to: self ? "Changed" : "Set by an admin",
+    });
+    return self ? "Your password is changed." : `Password set for ${m.name}. Send it to them the way you would send a password.`;
   });
 }
 

@@ -452,7 +452,12 @@ function PersonBody({ ops, id }: { ops: Ops; id: string }) {
   const left = p.leaveTotal - p.leaveUsed;
   const leavePct = p.leaveTotal ? `${Math.max(0, (left / p.leaveTotal) * 100)}%` : "0%";
   const boards = [{ id: "__all", name: "All" }, ...w.depts];
-  const canLink = m.teamAdmin && !m.previewing && (!p.isOwner || m.me.isOwner) && p.id !== m.me.id;
+  const self = p.id === m.me.id;
+  const overThem = m.teamAdmin && !m.previewing && (!p.isOwner || m.me.isOwner) && !self;
+  const canLink = overThem && p.status !== "Exited";
+  // Anyone may change their own; an admin may set somebody else's.
+  const canPassword = !m.previewing && (self || overThem);
+  const canRemove = overThem;
 
   async function link() {
     setLinkBusy(true);
@@ -496,6 +501,17 @@ function PersonBody({ ops, id }: { ops: Ops; id: string }) {
             className="fw-s h-[34px] rounded-lg border border-edge2 bg-white px-3.5 text-xs text-accent hover:bg-tint disabled:opacity-60"
           >
             {linkBusy ? "Making link…" : p.canLogin ? "New login link" : "Send login link"}
+          </button>
+        )}
+        {canPassword && (
+          <button
+            type="button"
+            disabled={!self && !p.email}
+            title={self || p.email ? undefined : "Add an email first"}
+            onClick={() => openModal(ops, "password", { memberId: p.id })}
+            className="fw-s h-[34px] rounded-lg border border-edge2 bg-white px-3.5 text-xs hover:bg-tint disabled:opacity-60"
+          >
+            {self ? "Change password" : "Set password"}
           </button>
         )}
       </div>
@@ -601,6 +617,20 @@ function PersonBody({ ops, id }: { ops: Ops; id: string }) {
               </span>
             ))}
           </div>
+        </div>
+      )}
+      {canRemove && (
+        <div className="mt-2 border-t border-line pt-4">
+          <button
+            type="button"
+            onClick={() => openModal(ops, "removeMember", { id: p.id, name: p.name })}
+            className="fw-s h-[38px] rounded-lg border border-[#FCA5A5] bg-white px-4 text-[13px] text-bad hover:bg-[#FEF2F2]"
+          >
+            Remove from team
+          </button>
+          <p className="m-0 mt-2 text-xs text-mute">
+            Somebody already on tasks or money is kept — set their status to Exited instead, which ends their access.
+          </p>
         </div>
       )}
       {open.length > 0 && (

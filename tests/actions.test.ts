@@ -37,7 +37,7 @@ const { signup, login } = await import("../src/app/(auth)/actions");
 const { createClient, addBrand, setGrant } = await import("../src/app/(app)/actions/clients");
 const { createTask, addNote } = await import("../src/app/(app)/actions/tasks");
 const { createEntry } = await import("../src/app/(app)/actions/ledger");
-const { createMember } = await import("../src/app/(app)/actions/team");
+const { createMember, removeMember, setMemberPassword } = await import("../src/app/(app)/actions/team");
 const { setFeature } = await import("../src/app/(app)/actions/access");
 const { getSigned } = await import("../src/lib/auth");
 
@@ -165,9 +165,10 @@ describe("changing things", () => {
   });
 });
 
+let memberCookie = "";
+let memberId = "";
+
 describe("what someone without the access is told", () => {
-  let memberCookie = "";
-  let memberId = "";
 
   beforeAll(async () => {
     const r = await createMember({ name: "Rahul Writer", role: "Content writer", email: `rahul-${suffix}@test.dev` });
@@ -227,6 +228,47 @@ describe("what someone without the access is told", () => {
     });
   });
 
+  test("an owner can set their password, and is told when it is wrong", async () => {
+    const before = (await owner.member.findUniqueOrThrow({ where: { id: (await getSigned())!.me.id } })).passwordHash;
+
+    const wrong = await setMemberPassword({ memberId: (await getSigned())!.me.id, current: "not it", password: "a new long password", confirm: "a new long password" });
+    expect(wrong.ok).toBe(false);
+    expect(wrong.ok === false && wrong.fields?.current).toMatch(/current password/i);
+
+    const r = await setMemberPassword({
+      memberId: (await getSigned())!.me.id,
+      current: "correct horse battery",
+      password: "an even longer one",
+      confirm: "an even longer one",
+    });
+    expect(r.ok).toBe(true);
+    const after = (await owner.member.findUniqueOrThrow({ where: { id: (await getSigned())!.me.id } })).passwordHash;
+    expect(after).not.toBe(before);
+    // Still signed in: changing your own password does not log you out.
+    expect(await getSigned()).not.toBeNull();
+  });
+
+  test("an owner sets a member's password, which signs them out everywhere", async () => {
+    const stale = await owner.session.create({ data: { tenantId, memberId, expiresAt: new Date(Date.now() + 864e5) } });
+    const r = await setMemberPassword({ memberId, password: "members new password", confirm: "members new password" });
+    expect(r.ok).toBe(true);
+    expect((await owner.session.findUniqueOrThrow({ where: { id: stale.id } })).revokedAt).not.toBeNull();
+
+    // Including the one these tests were using — which is the point of it. The
+    // rest of this file acts as them again, so give them a fresh sign-in.
+    await as(memberCookie, async () => expect(await getSigned()).toBeNull());
+    const fresh = await owner.session.create({ data: { tenantId, memberId, expiresAt: new Date(Date.now() + 864e5) } });
+    const { signSession } = await import("../src/lib/session");
+    memberCookie = await signSession({ sid: fresh.id, uid: memberId, tid: tenantId }, 86400);
+  });
+
+  test("a member cannot set somebody else's password", async () => {
+    await as(memberCookie, async () => {
+      const r = await setMemberPassword({ memberId: (await owner.member.findFirstOrThrow({ where: { tenantId, isOwner: true } })).id, password: "takeover please", confirm: "takeover please" });
+      expect(r.ok).toBe(false);
+    });
+  });
+
   test("the assignee can note on their own task even without Edit on the client", async () => {
     const t = await owner.task.findFirstOrThrow({ where: { tenantId, title: "Allowed now" } });
     await setGrant({ memberId, clientId, level: "view" });
@@ -236,5 +278,49 @@ describe("what someone without the access is told", () => {
     });
     const note = await owner.taskNote.findFirstOrThrow({ where: { taskId: t.id } });
     expect(note.link).toBe("https://docs.example.com/a");
+  });
+
+  test("somebody who has done work is kept, and the refusal says what to do instead", async () => {
+    const r = await removeMember(memberId);
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.error).toMatch(/task/i);
+    expect(r.ok === false && r.error).toMatch(/Exited/);
+    expect(await owner.member.count({ where: { id: memberId } })).toBe(1);
+  });
+});
+
+describe("taking somebody off the team", () => {
+  test("a member added by mistake is deleted outright", async () => {
+    const r = await createMember({ name: "Added By Mistake", role: "Intern" });
+    if (!r.ok) throw new Error(r.error);
+    const strayId = r.data!.id;
+
+    expect((await removeMember(strayId)).ok).toBe(true);
+    expect(await owner.member.count({ where: { id: strayId } })).toBe(0);
+  });
+
+  test("their client grants and sessions go with them", async () => {
+    const r = await createMember({ name: "Briefly Here", role: "Intern" });
+    if (!r.ok) throw new Error(r.error);
+    const id = r.data!.id;
+    await setGrant({ memberId: id, clientId, level: "view" });
+    await owner.session.create({ data: { tenantId, memberId: id, expiresAt: new Date(Date.now() + 864e5) } });
+
+    expect((await removeMember(id)).ok).toBe(true);
+    expect(await owner.clientGrant.count({ where: { memberId: id } })).toBe(0);
+    expect(await owner.session.count({ where: { memberId: id } })).toBe(0);
+  });
+
+  test("you cannot remove yourself, or the last owner", async () => {
+    const meId = (await getSigned())!.me.id;
+    const r = await removeMember(meId);
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.error).toMatch(/yourself/i);
+    expect(await owner.member.count({ where: { id: meId } })).toBe(1);
+  });
+
+  test("the removal is in the audit trail", async () => {
+    const rows = await owner.auditEntry.findMany({ where: { tenantId, text: { contains: "removed" } } });
+    expect(rows.some((a) => a.text.includes("from the team"))).toBe(true);
   });
 });

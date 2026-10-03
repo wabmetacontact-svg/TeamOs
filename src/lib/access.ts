@@ -185,4 +185,6 @@ export const FORM_FEATURE: Record<string, Feature> = {
   draw: "payroll",
   deleteDraw: "payroll",
   salary: "payroll",
+  password: "team",
+  removeMember: "team",
 };

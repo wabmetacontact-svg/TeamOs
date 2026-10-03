@@ -8,7 +8,7 @@ import type { EntryW, MemberW, Result } from "@/lib/types";
 import { createClient, editClient, removeClient } from "@/app/(app)/actions/clients";
 import { createEntry, deleteDraw, deleteEntry, editEntry, recordDraw, saveSalary } from "@/app/(app)/actions/ledger";
 import { createTask } from "@/app/(app)/actions/tasks";
-import { createMember, editMember, requestLeave } from "@/app/(app)/actions/team";
+import { createMember, editMember, removeMember, requestLeave, setMemberPassword } from "@/app/(app)/actions/team";
 import { FieldError } from "@/app/(auth)/auth-screen";
 import { type Form, type ModalType, type QuickKind, useOps } from "./store";
 
@@ -140,7 +140,10 @@ export function openModal(ops: Ops, type: ModalType, data: Record<string, unknow
   }
   if (type === "leave") form = { who: (m.teamAdmin && str(data.who)) || m.me.id, type: "Annual", from: "", to: "", note: "" };
   if (type === "draw") form = { partner: m.owners[0]?.id ?? "", amount: "", date: today, src: str(data.src), note: "" };
-  if (type === "deleteDraw" || type === "confirmDelete") form = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, str(v)]));
+  if (type === "deleteDraw" || type === "confirmDelete" || type === "removeMember") {
+    form = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, str(v)]));
+  }
+  if (type === "password") form = { memberId: str(data.memberId), current: "", password: "", confirm: "" };
   if (type === "salary") {
     const p = m.P(str(data.pid));
     form = {
@@ -429,6 +432,33 @@ function specFor(ops: Ops, type: ModalType, f: Form): Spec {
     };
   }
 
+  if (type === "password") {
+    const p = m.P(f.memberId);
+    const self = p.id === m.me.id;
+    return {
+      title: self ? "Change your password" : `Set a password for ${p.name}`,
+      submit: self ? "Change password" : "Set password",
+      fields: [
+        ...(self ? [{ name: "current", label: "Current password", type: "password", full: true }] : []),
+        { name: "password", label: "New password", type: "password", ph: "At least 8 characters", full: true },
+        { name: "confirm", label: "Confirm new password", type: "password", ph: "Type it again", full: true },
+      ],
+      note: self
+        ? "Your other sessions will be signed out. This one stays."
+        : `${p.name} will be signed out everywhere, and any login link waiting for them stops working. Send the new password the way you would send a password — or use a login link instead, so you never handle it.`,
+    };
+  }
+
+  if (type === "removeMember") {
+    return {
+      title: "Remove from team",
+      submit: "Remove",
+      danger: true,
+      text: `Remove ${f.name} from the team? They lose access immediately. If they are already on tasks or money, nothing is deleted — you will be told to mark them Exited instead.`,
+      fields: [],
+    };
+  }
+
   if (type === "confirmDelete") {
     return {
       title: "Delete entry",
@@ -530,6 +560,7 @@ export function FormModal() {
     if (type === "client" && data?.id) router.push(`/clients/${data.id}`);
     if (type === "editClient") ops.setDrawer({ type: "client", id: f.id! });
     if (type === "editMember") ops.setDrawer({ type: "person", id: f.id! });
+    if (type === "removeMember") ops.setDrawer(null);
     if (type === "member" && data?.link) {
       ops.setNotice({
         title: `Send ${f.name} their login link`,
@@ -670,6 +701,10 @@ function dispatch(type: ModalType, f: Form): Promise<Result<unknown>> {
       return deleteDraw(f.id!);
     case "salary":
       return saveSalary(f as never);
+    case "password":
+      return setMemberPassword(f as never);
+    case "removeMember":
+      return removeMember(f.id!);
   }
 }
 

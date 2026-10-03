@@ -34,7 +34,9 @@ export type ModalType =
   | "leave"
   | "draw"
   | "deleteDraw"
-  | "salary";
+  | "salary"
+  | "password"
+  | "removeMember";
 
 export type Form = Record<string, string>;
 export type Modal = { type: ModalType; form: Form; errors: Record<string, string>; busy: boolean };

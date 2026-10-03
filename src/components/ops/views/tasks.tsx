@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { addDays, dLabel, fmtTsShort } from "@/lib/format";
+import { addDays, dLabel, fmtTsShort, ymAdd, ymLabel } from "@/lib/format";
 import { DOT, PRI, SCHIP, STATUS, type DisplayStatus } from "@/lib/labels";
 import { nextLabel, nextOccurrence, ruleShort, ruleText } from "@/lib/recurrence";
 import type { TaskW } from "@/lib/types";
@@ -17,9 +17,11 @@ import {
 } from "@/app/(app)/actions/tasks";
 import { ADD, openModal } from "../modals";
 import { openTask } from "../overlays";
+import { MonthGrid } from "../task-calendar";
 import { useOps, useWide } from "../store";
+import { MonthNav } from "../ui";
 
-type Mode = "table" | "board" | "sheet";
+type Mode = "table" | "board" | "sheet" | "calendar";
 
 export function TasksView() {
   const ops = useOps();
@@ -122,6 +124,7 @@ export function TasksView() {
           {modeBtn("table", "List")}
           {modeBtn("board", "Department board")}
           {modeBtn("sheet", "Sheet")}
+          {modeBtn("calendar", "Calendar")}
         </div>
         <button
           type="button"
@@ -180,7 +183,39 @@ export function TasksView() {
       {mode === "board" && (
         <Board list={list} status={status} deptFilter={dept} onAddDept={canEdit ? addDept : undefined} />
       )}
+      {mode === "calendar" && <CalendarMode list={list} />}
     </>
+  );
+}
+
+/** The same month grid the dashboard shows, over whatever the filters leave. */
+function CalendarMode({ list }: { list: TaskW[] }) {
+  const ops = useOps();
+  const { m } = ops;
+  const [ym, setYm] = useState(m.thisMonth);
+  const [sel, setSel] = useState(m.today);
+  const inMonth = list.filter((t) => t.due?.startsWith(ym));
+  const undated = list.filter((t) => !t.due).length;
+
+  return (
+    <div className="rounded-lg border border-line bg-white p-4">
+      <MonthNav
+        big={false}
+        label={ymLabel(ym)}
+        prev={() => setYm(ymAdd(ym, -1))}
+        next={() => setYm(ymAdd(ym, 1))}
+        today={() => {
+          setYm(m.thisMonth);
+          setSel(m.today);
+        }}
+      >
+        <span className="text-xs text-mute">
+          {inMonth.length} {inMonth.length === 1 ? "task" : "tasks"} due{undated ? ` · ${undated} with no due date` : ""}
+        </span>
+      </MonthNav>
+      <MonthGrid tasks={inMonth} ym={ym} selected={sel} onPick={setSel} />
+      <p className="mx-0.5 mb-0 mt-2.5 text-xs text-mute">Click a day to see everything on it. The filters above apply here too.</p>
+    </div>
   );
 }
 
