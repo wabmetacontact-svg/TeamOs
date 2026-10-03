@@ -34,12 +34,14 @@ export function TasksView() {
   const [brand, setBrand] = useState("all");
   const [dept, setDept] = useState("all");
   const [mode, setMode] = useState<Mode>("table");
+  const [ym, setYm] = useState(m.thisMonth);
+  const [allTime, setAllTime] = useState(false);
   const [asc, setAsc] = useState(false);
   const [showRec, setShowRec] = useState(false);
   const canEdit = m.edits("tasks") && !m.previewing;
 
   const ql = q.trim().toLowerCase();
-  const list = w.tasks
+  const matching = w.tasks
     .filter(
       (t) =>
         (who === "all" || t.whoId === who) &&
@@ -53,6 +55,12 @@ export function TasksView() {
       const r = a.created.localeCompare(b.created) || (a.due ?? "").localeCompare(b.due ?? "");
       return asc ? r : -r;
     });
+
+  // The calendar lays a month out itself, so it takes everything and shows
+  // what lands on its days; the other views are narrowed to the month here.
+  const byMonth = mode !== "calendar" && !allTime;
+  const list = byMonth ? matching.filter((t) => t.due?.startsWith(ym)) : matching;
+  const undated = byMonth ? matching.filter((t) => !t.due).length : 0;
   const lateN = list.filter((t) => m.lateDays(t) > 0).length;
   const series = w.series.filter((s) => !s.clientId || m.visIds.has(s.clientId));
 
@@ -71,6 +79,34 @@ export function TasksView() {
 
   return (
     <>
+      <MonthNav
+        bordered="edge"
+        label={byMonth || mode === "calendar" ? ymLabel(ym) : "All time"}
+        prev={() => {
+          if (!allTime) setYm(ymAdd(ym, -1));
+          setAllTime(false);
+        }}
+        next={() => {
+          if (!allTime) setYm(ymAdd(ym, 1));
+          setAllTime(false);
+        }}
+        today={() => {
+          setYm(m.thisMonth);
+          setAllTime(false);
+        }}
+        todayLabel="This month"
+      >
+        {mode !== "calendar" && (
+          <button
+            type="button"
+            onClick={() => setAllTime((v) => !v)}
+            className="fw-s h-9 rounded-lg border border-edge2 px-3.5 text-xs"
+            style={{ background: allTime ? "#111827" : "#fff", color: allTime ? "#fff" : "#0F172A" }}
+          >
+            All time
+          </button>
+        )}
+      </MonthNav>
       <div className="mb-3 flex flex-wrap gap-2">
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search tasks..." className="h-[38px] flex-[1_1_240px] rounded-lg border border-edge2 bg-white px-3.5 text-[13px]" />
         <select value={who} onChange={(e) => setWho(e.target.value)} className={sel}>
@@ -178,50 +214,37 @@ export function TasksView() {
         </div>
       )}
 
-      {mode === "table" && <TaskList list={list} wide={wide} asc={asc} toggleSort={() => setAsc((v) => !v)} lateN={lateN} />}
+      {mode === "table" && <TaskList list={list} wide={wide} asc={asc} toggleSort={() => setAsc((v) => !v)} lateN={lateN} undated={undated} />}
       {mode === "sheet" && <Sheet list={list} />}
       {mode === "board" && (
         <Board list={list} status={status} deptFilter={dept} onAddDept={canEdit ? addDept : undefined} />
       )}
-      {mode === "calendar" && <CalendarMode list={list} />}
+      {mode === "calendar" && <CalendarMode list={list} ym={ym} />}
     </>
   );
 }
 
 /** The same month grid the dashboard shows, over whatever the filters leave. */
-function CalendarMode({ list }: { list: TaskW[] }) {
-  const ops = useOps();
-  const { m } = ops;
-  const [ym, setYm] = useState(m.thisMonth);
+function CalendarMode({ list, ym }: { list: TaskW[]; ym: string }) {
+  const { m } = useOps();
   const [sel, setSel] = useState(m.today);
   const inMonth = list.filter((t) => t.due?.startsWith(ym));
-  const undated = list.filter((t) => !t.due).length;
+  const noDate = list.filter((t) => !t.due).length;
 
   return (
     <div className="rounded-lg border border-line bg-white p-4">
-      <MonthNav
-        big={false}
-        label={ymLabel(ym)}
-        prev={() => setYm(ymAdd(ym, -1))}
-        next={() => setYm(ymAdd(ym, 1))}
-        today={() => {
-          setYm(m.thisMonth);
-          setSel(m.today);
-        }}
-      >
-        <span className="text-xs text-mute">
-          {inMonth.length} {inMonth.length === 1 ? "task" : "tasks"} due{undated ? ` · ${undated} with no due date` : ""}
-        </span>
-      </MonthNav>
       <MonthGrid tasks={inMonth} ym={ym} selected={sel} onPick={setSel} />
-      <p className="mx-0.5 mb-0 mt-2.5 text-xs text-mute">Click a day to see everything on it. The filters above apply here too.</p>
+      <p className="mx-0.5 mb-0 mt-2.5 text-xs text-mute">
+        {inMonth.length} {inMonth.length === 1 ? "task" : "tasks"} due in {ymLabel(ym)}
+        {noDate ? ` · ${noDate} with no due date` : ""}. Click a day to see everything on it; the filters above apply here too.
+      </p>
     </div>
   );
 }
 
 const LIST_COLS = "84px minmax(0,2.4fr) minmax(0,.8fr) minmax(0,.7fr) minmax(0,1.5fr) minmax(0,.9fr) 64px 40px minmax(0,1fr) 84px 60px 84px 72px";
 
-function TaskList({ list, wide, asc, toggleSort, lateN }: { list: TaskW[]; wide: boolean; asc: boolean; toggleSort: () => void; lateN: number }) {
+function TaskList({ list, wide, asc, toggleSort, lateN, undated }: { list: TaskW[]; wide: boolean; asc: boolean; toggleSort: () => void; lateN: number; undated: number }) {
   const ops = useOps();
   const { w, m } = ops;
   const canVerify = m.teamAdmin && !m.previewing;
@@ -273,6 +296,7 @@ function TaskList({ list, wide, asc, toggleSort, lateN }: { list: TaskW[]; wide:
         {!list.length && <EmptyTasks />}
         <p className="mx-0.5 mb-0 mt-2.5 text-xs text-mute">
           {list.length} {list.length === 1 ? "task" : "tasks"} · {lateN} late
+          {undated ? ` · ${undated} with no due date, hidden by the month — use All time` : ""}
         </p>
       </>
     );
@@ -400,6 +424,7 @@ function TaskList({ list, wide, asc, toggleSort, lateN }: { list: TaskW[]; wide:
       {!list.length && <EmptyTasks />}
       <p className="mx-0.5 mb-0 mt-2.5 text-xs text-mute">
         {list.length} {list.length === 1 ? "task" : "tasks"} · {lateN} late
+        {undated ? ` · ${undated} with no due date, hidden by the month — use All time` : ""}
       </p>
     </>
   );

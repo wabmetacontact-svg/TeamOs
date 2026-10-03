@@ -165,7 +165,8 @@ async function main() {
   await page("/dashboard", ownerCookie, "dashboard", ["Spend by brand", "Acme Foods", "Recent changes"]);
   await page("/clients", ownerCookie, "clients", ["Acme Foods", "Acme Foods Pvt Ltd"]);
   await page(`/clients/${seeded.client.id}`, ownerCookie, "client page", ["Acme Foods", "Received since onboarding", "Who worked on them"]);
-  await page("/tasks", ownerCookie, "tasks", ["October content calendar", "Fix tracking pixel", "Recurring"]);
+  const monthLabel = new Date(`${ym}-01T00:00:00Z`).toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+  await page("/tasks", ownerCookie, "tasks", ["October content calendar", "Fix tracking pixel", "Recurring", monthLabel, "All time", "Calendar"]);
   await page("/team", ownerCookie, "team", ["Rahul Writer", "Headcount", "Leave requests"]);
   await page("/expenses", ownerCookie, "income and expenses", ["Acme retainer", "Office rent", "Pending"]);
   await page("/access", ownerCookie, "access", ["Rahul Writer", "Apply preset", "Dashboard figures"]);
