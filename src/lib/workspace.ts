@@ -162,6 +162,7 @@ export function mapClient(c: Client, ctx: MapCtx, rates: ClientRate[] = []): Cli
     contact: c.contact,
     sinceDate: dateOnly(c.sinceDate),
     payDay: c.payDay,
+    ownerId: c.ownerMemberId,
     rates: fin
       ? rates
           .filter((r) => r.clientId === c.id)
