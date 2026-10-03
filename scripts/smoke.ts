@@ -132,7 +132,12 @@ async function main() {
     const session = await tx.session.create({ data: { tenantId, memberId: owner.id, expiresAt: new Date(Date.now() + 864e5) } });
     const workerSession = await tx.session.create({ data: { tenantId, memberId: worker.id, expiresAt: new Date(Date.now() + 864e5) } });
     return { owner, worker, client, session, workerSession };
-  });
+  },
+  // Around forty inserts in one transaction, over the wire to a hosted
+  // Postgres. Prisma's 5s default is the latency of the network, not of the
+  // work: this failed at 5,117ms against Neon in Singapore, so the script was
+  // unrunnable from a laptop for no better reason than distance.
+  { timeout: 60_000, maxWait: 20_000 });
 
   const cookie = async (sid: string, uid: string) =>
     `${SESSION_COOKIE}=${await signSession({ sid, uid, tid: tenantId }, 86400)}`;
@@ -167,7 +172,7 @@ async function main() {
   await page(`/clients/${seeded.client.id}`, ownerCookie, "client page", ["Acme Foods", "Received since onboarding", "Who worked on them"]);
   const monthLabel = new Date(`${ym}-01T00:00:00Z`).toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
   await page("/tasks", ownerCookie, "tasks", ["October content calendar", "Fix tracking pixel", "Recurring", monthLabel, "All time", "Calendar"]);
-  await page("/team", ownerCookie, "team", ["Rahul Writer", "Headcount", "Leave requests"]);
+  await page("/team", ownerCookie, "team", ["Rahul Writer", "Headcount", "Leave requests", "Sales"]);
   await page("/expenses", ownerCookie, "income and expenses", ["Acme retainer", "Office rent", "Pending"]);
   await page("/access", ownerCookie, "access", ["Rahul Writer", "Apply preset", "Dashboard figures"]);
   await page("/audit", ownerCookie, "audit trail", ["added client"]);

@@ -88,6 +88,10 @@ model Member {
   features     Json    @default("{}")
   /// Task departments this person is limited to. Empty means all of them.
   taskDeptIds  String[] @default([])
+  /// Set when this person is mirrored from another system - the id they have
+  /// there (a WabMeta AdminUser). A repeated sync updates this row instead of
+  /// adding a second copy of the same person. Null for people created here.
+  externalId   String?
 
   // ── HR
   department     String?
@@ -137,8 +141,10 @@ model Member {
   leaves          Leave[]           @relation("LeaveFor")
   leavesDecided   Leave[]           @relation("LeaveDecider")
   auditEntries    AuditEntry[]
+  clientsOwned    Client[]          @relation("ClientOwner")
 
   @@unique([tenantId, email])
+  @@unique([tenantId, externalId])
   @@index([tenantId])
   @@map("members")
 }
@@ -240,13 +246,27 @@ model Client {
   /// Removed clients leave every list; their money and history stay.
   removedAt DateTime?
 
+  /// The system this client is mirrored from, e.g. "wabmeta". Null means it
+  /// was created here and nothing outside owns it.
+  externalSource String?
+  /// The id it has in that system. Unique per tenant, so a redelivered sync
+  /// event updates this client rather than creating a second one.
+  externalId     String?
+  /// The team member who brought the client in - the onboarder, on the
+  /// WabMeta side. This is credit, not access: who may open the client is
+  /// client_grants, and the two are deliberately separate.
+  ownerMemberId  String?
+  owner          Member? @relation("ClientOwner", fields: [ownerMemberId], references: [id], onDelete: SetNull)
+
   rates  ClientRate[]
   grants ClientGrant[]
   ledger LedgerEntry[]
   tasks  Task[]
   series TaskSeries[]
 
+  @@unique([tenantId, externalId])
   @@index([tenantId])
+  @@index([ownerMemberId])
   @@map("clients")
 }
 
@@ -319,11 +339,17 @@ model LedgerEntry {
   /// Partner draws: the client payment the draw came out of.
   sourceId    String?
   note        String?
+  /// Set when the entry is mirrored from another system, e.g.
+  /// "payment:<razorpay payment id>". Unique per tenant, and that is the
+  /// whole point: a sync event delivered twice updates this row instead of
+  /// recording the same money a second time.
+  externalId  String?
   createdById String
   createdBy   Member    @relation("LedgerBy", fields: [createdById], references: [id])
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
+  @@unique([tenantId, externalId])
   @@index([tenantId, date])
   @@index([clientId])
   @@map("ledger_entries")

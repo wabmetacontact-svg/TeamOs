@@ -4,11 +4,12 @@ import { useState } from "react";
 import { dLabel, dLong, dayDiff, initials, inr, inrShort, ymAdd, ymLabel } from "@/lib/format";
 import { decideLeave, removeHrDept } from "@/app/(app)/actions/team";
 import { paySalary, payAllSalaries } from "@/app/(app)/actions/ledger";
+import { salesByMember, unownedClients } from "@/lib/sales";
 import { openModal } from "../modals";
 import { useOps, useWide } from "../store";
 import { CardGrid, Chip, DashedAdd, LockNotice, MonthNav, StatCard, Tabs, TextLink } from "../ui";
 
-type Tab = "members" | "kpi" | "payroll";
+type Tab = "members" | "kpi" | "sales" | "payroll";
 
 export function TeamView() {
   const ops = useOps();
@@ -42,11 +43,13 @@ export function TeamView() {
         tabs={[
           ["members", "Members"],
           ["kpi", "KPIs"],
+          ["sales", "Sales"],
           ["payroll", "Payroll"],
         ]}
       />
       {tab === "members" && <Members />}
       {tab === "kpi" && <Kpis />}
+      {tab === "sales" && <Sales />}
       {tab === "payroll" && <Payroll />}
     </>
   );
@@ -297,6 +300,146 @@ function Kpis() {
         <div className="rounded-xl border border-dashed border-edge3 bg-white px-5 py-7 text-[13px] text-mute">
           {all ? "No tasks assigned yet." : "No tasks due in this month."}
         </div>
+      )}
+    </>
+  );
+}
+
+/**
+ * What each person brought in.
+ *
+ * Three different things on one card, because judging a salesperson on any one
+ * of them alone is misleading: the clients they are credited with, the money
+ * those clients actually paid, and whether they are keeping up with their own
+ * work. A big book with nothing received is a different problem from a small
+ * book that pays on time.
+ *
+ * Revenue is money RECEIVED, never what is billed - the same rule the rest of
+ * this app follows. The monthly figure is shown beside it as the recurring
+ * book, not as income.
+ *
+ * Only people with at least one client appear. A workspace where nobody is
+ * credited with anything says so, rather than listing every employee with four
+ * dashes against their name.
+ */
+function Sales() {
+  const ops = useOps();
+  const { w, m } = ops;
+  const [all, setAll] = useState(true);
+  const [ym, setYm] = useState(m.thisMonth);
+
+  const inWindow = (date: string) => all || date.startsWith(ym);
+
+  // The arithmetic is in src/lib/sales.ts, with its own tests. Money adding up
+  // correctly is not something to verify by looking at a screen.
+  const rows = salesByMember({
+    members: m.team,
+    clients: w.clients,
+    ledger: w.ledger,
+    tasks: w.tasks,
+    financeClientIds: m.finIds,
+    inWindow,
+    doneAt: m.doneAt,
+    lateDays: m.lateDays,
+  }).map((r) => ({ ...r, p: m.P(r.memberId) }));
+
+  const toggle = (on: boolean) => ({ background: on ? "#111827" : "#fff", color: on ? "#fff" : "#0F172A" });
+  const totalReceived = rows.reduce((a, r) => a + r.received, 0);
+  const unowned = unownedClients(w.clients);
+
+  return (
+    <>
+      <div className="mb-3 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            if (!all) setYm(ymAdd(ym, -1));
+            setAll(false);
+          }}
+          className="size-[34px] rounded-lg border border-edge2 bg-white"
+        >
+          ‹
+        </button>
+        <span className="fw-s min-w-[130px] text-center text-sm">{all ? "All time" : ymLabel(ym)}</span>
+        <button
+          type="button"
+          onClick={() => {
+            if (!all) setYm(ymAdd(ym, 1));
+            setAll(false);
+          }}
+          className="size-[34px] rounded-lg border border-edge2 bg-white"
+        >
+          ›
+        </button>
+        {!!rows.length && <span className="text-xs text-mute">{inr(totalReceived)} received in all</span>}
+        <span className="flex-1" />
+        <button type="button" onClick={() => setAll(false)} className="fw-s h-[30px] rounded-full border border-edge2 px-3 text-xs" style={toggle(!all)}>
+          By month
+        </button>
+        <button type="button" onClick={() => setAll(true)} className="fw-s h-[30px] rounded-full border border-edge2 px-3 text-xs" style={toggle(all)}>
+          All time
+        </button>
+      </div>
+
+      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))" }}>
+        {rows.map((r) => (
+          <button
+            key={r.p.id}
+            type="button"
+            onClick={() => ops.setDrawer({ type: "person", id: r.p.id })}
+            className="flex flex-col gap-3.5 rounded-[10px] border border-line bg-white p-4 text-left text-[13px] hover:border-accent-l"
+          >
+            <span className="flex items-center gap-2.5">
+              <span className="fw-s flex size-9 items-center justify-center rounded-full bg-accent-s text-xs text-indigo">{initials(r.p.name)}</span>
+              <span className="min-w-0 flex-1">
+                <span className="fw-s block">{r.p.name}</span>
+                <span className="text-xs text-mute">{r.p.title}</span>
+              </span>
+              <span className="fw-s tnum text-right text-[18px] leading-tight">{inrShort(r.received)}</span>
+            </span>
+            <span className="grid grid-cols-3 gap-x-2 gap-y-2.5">
+              {[
+                ["Clients", String(r.clients)],
+                ["Received", inrShort(r.received)],
+                ["Per month", inrShort(r.bookPerMonth)],
+                ["Tasks done", String(r.tasksDone)],
+                ["Overdue", String(r.tasksOverdue)],
+                ["", ""],
+              ].map(([label, value], i) =>
+                label ? (
+                  <span key={label}>
+                    <span className="block text-[11px] text-mute">{label}</span>
+                    <span className="fw-s" style={{ color: label === "Overdue" && r.tasksOverdue ? "#DC2626" : undefined }}>
+                      {value}
+                    </span>
+                  </span>
+                ) : (
+                  <span key={`gap-${i}`} />
+                ),
+              )}
+            </span>
+            {!!r.hiddenClients && (
+              <span className="block text-[11px] text-mute">
+                {r.hiddenClients} of their client{r.hiddenClients === 1 ? "" : "s"} is not yours to see the money on, so this total is
+                partial.
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {!rows.length && (
+        <div className="rounded-xl border border-dashed border-edge3 bg-white px-5 py-7 text-[13px] text-mute">
+          Nobody is credited with a client yet. Clients that arrive from WabMeta carry the onboarder who brought them in;
+          clients added here can be pointed at somebody from the client&apos;s own page.
+        </div>
+      )}
+
+      {!!unowned && !!rows.length && (
+        <p className="mt-3 text-xs text-mute">
+          {unowned} client{unowned === 1 ? "" : "s"} {unowned === 1 ? "is" : "are"} credited to nobody, so{" "}
+          {unowned === 1 ? "its" : "their"} money is not counted above.
+        </p>
       )}
     </>
   );

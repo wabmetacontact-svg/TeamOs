@@ -14,6 +14,7 @@
     "test:watch": "vitest",
     "smoke": "tsx scripts/smoke.ts",
     "db:app-role": "tsx scripts/create-app-role.ts",
+    "db:tenants": "tsx scripts/tenants.ts",
     "gate": "npm run typecheck && npm run lint && npm run test"
   },
   "dependencies": {

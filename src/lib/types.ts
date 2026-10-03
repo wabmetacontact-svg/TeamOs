@@ -74,6 +74,12 @@ export type ClientW = {
   sinceDate: string | null;
   payDay: number | null;
   rates: { from: string; to: string | null; amount: number; currency: string }[];
+  /**
+   * The team member who brought this client in. Credit, not access - who may
+   * open a client is still decided by grants. Set by the WabMeta sync for the
+   * clients it mirrors, and null for clients added here.
+   */
+  ownerId: string | null;
 };
 
 /** id is "memberId:clientId". */

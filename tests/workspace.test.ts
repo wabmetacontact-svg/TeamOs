@@ -174,6 +174,25 @@ describe("what each person is sent", () => {
     expect(w.clients.find((c) => c.name === "Seen Co")?.retainer).toBe(100_000);
   });
 
+  test("a client carries who brought it in, which is credit and not access", async () => {
+    // The Sales tab adds up revenue by this field. It must reach the browser
+    // for everyone who can see the client at all - an owner credited with a
+    // client is not the same thing as somebody granted access to it, and a
+    // viewer without Finance should still see who the client belongs to.
+    await owner.client.update({ where: { id: ids.seen! }, data: { ownerMemberId: ids.books! } });
+
+    const books = await loadWorkspace(await signedAs(ids.books!));
+    expect(books.clients.find((c) => c.name === "Seen Co")?.ownerId).toBe(ids.books);
+
+    const worker = await loadWorkspace(await signedAs(ids.worker!));
+    const seen = worker.clients.find((c) => c.name === "Seen Co");
+    expect(seen?.ownerId).toBe(ids.books);
+    // Still no money for them, which is the point of the two being separate.
+    expect(seen?.retainer).toBeNull();
+
+    await owner.client.update({ where: { id: ids.seen! }, data: { ownerMemberId: null } });
+  });
+
   test("audit entries follow the same reach", async () => {
     const worker = await loadWorkspace(await signedAs(ids.worker!));
     expect(worker.audit.map((a) => a.text)).toEqual(["about seen"]);
