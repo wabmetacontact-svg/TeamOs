@@ -266,8 +266,30 @@ describe("a client arriving from WabMeta", () => {
     expect(row.externalSource).toBe(SOURCE);
     expect(row.retainer).toBe(299900n);
     expect(row.owner?.externalId).toBe(ONBOARDER);
-    // Credit is not access: being the onboarder grants no grant.
+    // The person WabMeta assigned can open it: Edit, and never Finance. Without
+    // this a seller signed in to an empty Clients screen.
+    const grants = await owner.clientGrant.findMany({ where: { clientId: row.id } });
+    expect(grants).toHaveLength(1);
+    expect(grants[0]).toMatchObject({ memberId: row.ownerMemberId, level: "edit" });
+  });
+
+  test("an owner taking that access away is not undone by the next sync", async () => {
+    const row = await owner.client.findFirstOrThrow({ where: { tenantId, externalId: ORG } });
+    await owner.clientGrant.deleteMany({ where: { clientId: row.id } });
+    // A change that is not a new assignment - the monthly figure moved.
+    await applyEvents(tenantId, [client({ retainerPaise: 399900 })]);
     expect(await owner.clientGrant.count({ where: { clientId: row.id } })).toBe(0);
+    await applyEvents(tenantId, [client()]);
+  });
+
+  test("an existing grant is never lowered", async () => {
+    const row = await owner.client.findFirstOrThrow({ where: { tenantId, externalId: ORG } });
+    await owner.clientGrant.create({ data: { tenantId, memberId: row.ownerMemberId!, clientId: row.id, level: "finance" } });
+    // Reassign away and back: the second assignment is new, but Finance stays.
+    await applyEvents(tenantId, [client({ ownerExternalId: null })]);
+    await applyEvents(tenantId, [client()]);
+    const g = await owner.clientGrant.findFirstOrThrow({ where: { clientId: row.id, memberId: row.ownerMemberId! } });
+    expect(g.level).toBe("finance");
   });
 
   test("a redelivery changes nothing", async () => {

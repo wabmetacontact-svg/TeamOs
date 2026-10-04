@@ -20,11 +20,12 @@ import { tenantTransaction } from "./db";
  *      in WabMeta (`externalId`, unique per tenant) and is an upsert. Applying
  *      the same event ten times leaves the same single row.
  *
- *   2. THE SYNC NEVER GRANTS ACCESS. A WabMeta admin arriving here becomes a
- *      member with no features, no password and no client grants — somebody on
- *      the team list and nothing more. Who may see money or open a client is
- *      decided in TeamOS, by an owner, and a push from another system must not
- *      be able to change it.
+ *   2. THE SYNC GRANTS ALMOST NOTHING. A WabMeta admin arriving here becomes a
+ *      member with no features, no password and no grants — somebody on the
+ *      team list and nothing more. The one exception: the person WabMeta
+ *      assigns to a client (its seller or its onboarder) gets Edit on that
+ *      client, never Finance, when the assignment is new. They still cannot
+ *      sign in or open a screen until an owner sets a password and features.
  *
  *   3. ONE EVENT, ONE TRANSACTION. Events are applied one at a time and
  *      reported separately, so a payment whose client has not arrived yet
@@ -380,6 +381,13 @@ async function applyClient(tx: Tx, tenantId: string, e: ClientEvent): Promise<Ev
       target: name,
       clientId: existing.id,
     });
+    // Only somebody newly assigned. Re-granting on every change would undo an
+    // owner who took the access away on the Access screen.
+    const newly = [
+      ownerMemberId !== existing.ownerMemberId ? ownerMemberId : null,
+      onboarderMemberId !== existing.onboarderMemberId ? onboarderMemberId : null,
+    ];
+    await grantAssigned(tx, tenantId, existing.id, name, newly);
     return { id: e.id, status: "applied" };
   }
 
@@ -403,7 +411,34 @@ async function applyClient(tx: Tx, tenantId: string, e: ClientEvent): Promise<Ev
     select: { id: true },
   });
   await log(tx, tenantId, { kind: "client", text: `added ${name} from WabMeta`, target: name, clientId: created.id });
+  await grantAssigned(tx, tenantId, created.id, name, [ownerMemberId, onboarderMemberId]);
   return { id: e.id, status: "applied" };
+}
+
+/**
+ * Lets the people WabMeta assigns to a client open it here: Edit, never
+ * Finance. A seller or onboarder in WabMeta works on exactly these clients, and
+ * without this they signed in to TeamOS and found an empty client list.
+ *
+ * skipDuplicates, so an existing grant - Finance included - is never lowered
+ * or changed. The caller passes only people newly assigned, so access an owner
+ * removed stays removed until WabMeta assigns that person again.
+ */
+async function grantAssigned(tx: Tx, tenantId: string, clientId: string, name: string, memberIds: (string | null)[]) {
+  const ids = [...new Set(memberIds.filter((x): x is string => !!x))];
+  if (!ids.length) return;
+  const { count } = await tx.clientGrant.createMany({
+    data: ids.map((memberId) => ({ tenantId, memberId, clientId, level: "edit" })),
+    skipDuplicates: true,
+  });
+  if (count) {
+    await log(tx, tenantId, {
+      kind: "client",
+      text: `gave Edit access to ${name} to the ${count === 1 ? "person" : "people"} WabMeta assigned to it`,
+      target: name,
+      clientId,
+    });
+  }
 }
 
 // ── money ──────────────────────────────────────────────────────────────────
