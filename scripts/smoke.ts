@@ -79,9 +79,11 @@ async function main() {
         retainer: 15_000_000n,
         services: "LinkedIn and X management",
         contact: "Neha Gupta",
-        sinceDate: day("2026-02-01"),
+        // This month, because the Clients screen lists the month's joiners by
+        // default; a client from February would be in the data but not on screen.
+        sinceDate: day(`${ym}-01`),
         payDay: 5,
-        rates: { create: { tenantId, fromDate: day("2026-02-01"), amount: 15_000_000n, currency: "INR" } },
+        rates: { create: { tenantId, fromDate: day(`${ym}-01`), amount: 15_000_000n, currency: "INR" } },
       },
     });
     await tx.clientGrant.create({ data: { tenantId, memberId: worker.id, clientId: client.id, level: "edit" } });
@@ -168,7 +170,10 @@ async function main() {
 
   console.log("\nowner");
   await page("/dashboard", ownerCookie, "dashboard", ["Spend by brand", "Acme Foods", "Recent changes"]);
-  await page("/clients", ownerCookie, "clients", ["Acme Foods", "Acme Foods Pvt Ltd"]);
+  // ">Acme Foods<" is the rendered row, not the name inside the page's data -
+  // every client is sent to the browser, so a bare name would match even when
+  // the list shows nothing.
+  await page("/clients", ownerCookie, "clients", [">Acme Foods<", "Acme Foods Pvt Ltd", "joined in"]);
   await page(`/clients/${seeded.client.id}`, ownerCookie, "client page", ["Acme Foods", "Received since onboarding", "Who worked on them"]);
   const monthLabel = new Date(`${ym}-01T00:00:00Z`).toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
   await page("/tasks", ownerCookie, "tasks", ["October content calendar", "Fix tracking pixel", "Recurring", monthLabel, "All time", "Calendar"]);

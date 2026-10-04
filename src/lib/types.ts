@@ -80,6 +80,8 @@ export type ClientW = {
    * clients it mirrors, and null for clients added here.
    */
   ownerId: string | null;
+  /** Who is onboarding it, when somebody is. */
+  onboarderId: string | null;
 };
 
 /** id is "memberId:clientId". */

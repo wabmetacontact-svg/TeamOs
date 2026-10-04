@@ -298,6 +298,47 @@ describe("a client arriving from WabMeta", () => {
   });
 });
 
+describe("a sale handed to an onboarder", () => {
+  const SELLER = `seller-${suffix}`;
+  const SOLD = `sold-${suffix}`;
+
+  test("names the seller as owner and the onboarder separately", async () => {
+    await applyEvents(tenantId, [member({ externalId: SELLER, name: "Asha Sales", email: `asha-${suffix}@wabmeta.test`, title: "Sales" })]);
+    const [r] = await applyEvents(tenantId, [
+      client({ externalId: SOLD, name: "Sold Co", ownerExternalId: SELLER, onboarderExternalId: ONBOARDER }),
+    ]);
+    expect(r).toMatchObject({ status: "applied" });
+
+    const row = await owner.client.findFirstOrThrow({
+      where: { tenantId, externalId: SOLD },
+      include: { owner: true, onboarder: true },
+    });
+    expect(row.owner?.externalId).toBe(SELLER);
+    expect(row.onboarder?.externalId).toBe(ONBOARDER);
+  });
+
+  test("a redelivery is unchanged, and a different onboarder is a change", async () => {
+    const [same] = await applyEvents(tenantId, [
+      client({ externalId: SOLD, name: "Sold Co", ownerExternalId: SELLER, onboarderExternalId: ONBOARDER }),
+    ]);
+    expect(same).toMatchObject({ status: "unchanged" });
+
+    const [moved] = await applyEvents(tenantId, [
+      client({ externalId: SOLD, name: "Sold Co", ownerExternalId: SELLER, onboarderExternalId: null }),
+    ]);
+    expect(moved).toMatchObject({ status: "applied" });
+    const row = await owner.client.findFirstOrThrow({ where: { tenantId, externalId: SOLD } });
+    expect(row.onboarderMemberId).toBeNull();
+    // The sale is untouched by whatever happens to the onboarding.
+    expect(row.ownerMemberId).not.toBeNull();
+  });
+
+  test("a sender that predates the field still works", async () => {
+    const [r] = await applyEvents(tenantId, [client({ externalId: `old-${suffix}`, name: "Old Sender Co" })]);
+    expect(r).toMatchObject({ status: "applied" });
+  });
+});
+
 describe("money", () => {
   test("a payment lands against its client, in paise", async () => {
     const [r] = await applyEvents(tenantId, [payment()]);
