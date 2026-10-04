@@ -3,7 +3,7 @@
  * on the server before anything is written, so they are tested once.
  */
 import { describe, expect, test } from "vitest";
-import { autoMap, checkRows, parseCSV, toISO, toNum, type ImportData, type LedgerRec, type TaskRec } from "../src/lib/importer";
+import { adKey, autoMap, checkRows, ledgerKey, parseCSV, toISO, toNum, toYM, type AdRec, type ClientRec, type ImportData, type LedgerRec, type TaskRec } from "../src/lib/importer";
 
 const data: ImportData = {
   meId: "me",
@@ -121,5 +121,93 @@ describe("checking", () => {
       data,
     );
     expect(rows.map((r) => r.ok)).toEqual([true, false]);
+  });
+});
+
+describe("earlier data", () => {
+  const none = { mkClients: false, mkMembers: false };
+
+  test("months in the shapes people type them", () => {
+    expect(toYM("2026-09")).toBe("2026-09");
+    expect(toYM("9/2026")).toBe("2026-09");
+    expect(toYM("Sep 2026")).toBe("2026-09");
+    expect(toYM("September-26")).toBe("2026-09");
+    expect(toYM("15/09/2026")).toBe("2026-09");
+    expect(toYM("")).toBe("");
+    expect(toYM("Smarch 2026")).toBeNull();
+    expect(toYM("2026-13")).toBeNull();
+  });
+
+  test("a client brings its sales person, onboarder and account", () => {
+    const [row] = checkRows(
+      "clients",
+      [["Contoso", "asha", "Vikram Shah", "contoso@mail.in", "+91 98765 43210", "Pays on the 5th"]],
+      { name: "0", seller: "1", onboarder: "2", login: "3", phone: "4", details: "5" },
+      none,
+      data,
+    );
+    expect(row!.ok).toBe(true);
+    expect(row!.rec as ClientRec).toMatchObject({ seller: "p1", onboarder: "p2", loginId: "contoso@mail.in", phone: "+91 98765 43210", details: "Pays on the 5th" });
+  });
+
+  test("a sales person not on the team is refused, or added when allowed", () => {
+    const map = { name: "0", seller: "1" };
+    expect(checkRows("clients", [["Contoso", "Rohit"]], map, none, data)[0]!.ok).toBe(false);
+    const [row] = checkRows("clients", [["Contoso", "Rohit"]], map, { mkClients: false, mkMembers: true }, data);
+    expect(row!.ok).toBe(true);
+    expect((row!.rec as ClientRec).newSeller).toBe("Rohit");
+  });
+
+  test("columns for the new client fields match by name", () => {
+    expect(autoMap("clients", ["Client Name", "Sales Person", "Onboarded By", "Login ID", "Mobile"])).toMatchObject({
+      name: "0",
+      seller: "1",
+      onboarder: "2",
+      login: "3",
+      phone: "4",
+    });
+  });
+
+  test("a ledger row already recorded is not imported again", () => {
+    const ledgerKeys = new Set([ledgerKey({ type: "in", date: "2026-09-01", paise: 8_300_000, clientId: "c1", desc: "Retainer, Sept" })]);
+    const rows = checkRows(
+      "ledger",
+      [
+        ["2026-09-01", "Retainer, Sept", "83000", "Income", "Northwind"],
+        ["2026-09-02", "Retainer, Sept", "83000", "Income", "Northwind"],
+      ],
+      { date: "0", desc: "1", amount: "2", type: "3", client: "4" },
+      none,
+      { ...data, ledgerKeys },
+    );
+    expect(rows.map((r) => r.ok)).toEqual([false, true]);
+    expect(rows[0]!.msg).toContain("Already in the ledger");
+  });
+
+  test("a ledger row can say whose it is", () => {
+    const [row] = checkRows("ledger", [["2026-09-28", "Salary", "25000", "Expense", "Asha Rao"]], { date: "0", desc: "1", amount: "2", type: "3", member: "4" }, none, data);
+    expect((row!.rec as LedgerRec).member).toBe("p1");
+    expect(checkRows("ledger", [["2026-09-28", "Salary", "25000", "Expense", "Ghost"]], { date: "0", desc: "1", amount: "2", type: "3", member: "4" }, none, data)[0]!.ok).toBe(false);
+  });
+
+  test("ad spend by person and month", () => {
+    const map = { who: "0", month: "1", amount: "2", leads: "3", note: "4" };
+    const adKeys = new Set([adKey({ memberId: "p1", month: "2026-08", paise: 1_000_000, leads: 40 })]);
+    const rows = checkRows(
+      "ads",
+      [
+        ["Asha", "Sep 2026", "₹12,900", "310", "Meta"],
+        ["Asha", "Aug 2026", "10000", "40", ""],
+        ["Ghost", "Sep 2026", "100", "1", ""],
+        ["Vikram", "Sep 2026", "", "", ""],
+        ["Vikram", "Sep 2026", "500", "2.5", ""],
+      ],
+      map,
+      none,
+      { ...data, adKeys },
+    );
+    expect(rows.map((r) => r.ok)).toEqual([true, false, false, false, false]);
+    expect(rows[0]!.rec as AdRec).toMatchObject({ who: "p1", month: "2026-09", amount: 12900, leads: 310, note: "Meta" });
+    expect(rows[1]!.msg).toContain("Already recorded");
   });
 });

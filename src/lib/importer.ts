@@ -8,7 +8,7 @@
 
 import { iso } from "./format";
 
-export type ImportType = "tasks" | "clients" | "team" | "ledger" | "leave";
+export type ImportType = "tasks" | "clients" | "team" | "ledger" | "leave" | "ads";
 
 /** [key, label, required, synonyms for auto-matching] */
 export type FieldSpec = [key: string, label: string, required: 0 | 1, synonyms: string];
@@ -34,7 +34,7 @@ export const IMP: Record<ImportType, { label: string; go: string; hint: string; 
   clients: {
     label: "Clients",
     go: "clients",
-    hint: "Name, company, brand, monthly rate, services, contact",
+    hint: "Name, company, monthly rate, sales person, onboarder, login, phone, notes",
     fields: [
       ["name", "Client name", 1, "client,clientname,name"],
       ["company", "Company", 0, "company,business"],
@@ -44,6 +44,11 @@ export const IMP: Record<ImportType, { label: string; go: string; hint: string; 
       ["contact", "Main contact", 0, "contact,poc,maincontact"],
       ["since", "Client since", 0, "since,startdate,start,clientsince"],
       ["cur", "Paid in currency", 0, "currency,cur"],
+      ["seller", "Sales person", 0, "sales,salesperson,seller,soldby,salesby,broughtby,salesexecutive"],
+      ["onboarder", "Onboarder", 0, "onboarder,onboardedby,onboarding"],
+      ["login", "Login ID", 0, "login,loginid,username,userid,loginemail"],
+      ["phone", "Phone", 0, "phone,mobile,whatsapp,phoneno,number"],
+      ["details", "Notes", 0, "notes,note,details,remarks,comments"],
     ],
   },
   team: {
@@ -68,7 +73,7 @@ export const IMP: Record<ImportType, { label: string; go: string; hint: string; 
   ledger: {
     label: "Income and expenses",
     go: "expenses",
-    hint: "Date, description, amount, income or expense, category, client, currency",
+    hint: "Date, description, amount, income or expense, category, client, team member",
     fields: [
       ["date", "Date", 1, "date,paidon,txndate,transactiondate"],
       ["type", "Income or expense", 0, "type,inout,kind,direction"],
@@ -79,6 +84,7 @@ export const IMP: Record<ImportType, { label: string; go: string; hint: string; 
       ["status", "Status", 0, "status"],
       ["cur", "Currency received", 0, "currency,cur"],
       ["orig", "Amount in that currency", 0, "foreignamount,receivedamount,originalamount,usdamount"],
+      ["member", "Team member", 0, "member,teammember,employee,person,staff,salesperson"],
     ],
   },
   leave: {
@@ -92,6 +98,18 @@ export const IMP: Record<ImportType, { label: string; go: string; hint: string; 
       ["to", "To", 1, "to,end,enddate"],
       ["note", "Note", 0, "note,reason,remarks"],
       ["status", "Status", 0, "status"],
+    ],
+  },
+  ads: {
+    label: "Ad spend and leads",
+    go: "ads",
+    hint: "Person, month, spent, leads, campaign - past months too",
+    fields: [
+      ["who", "Person", 1, "person,name,member,salesperson,employee,for"],
+      ["month", "Month", 1, "month,period,date"],
+      ["amount", "Spent (₹)", 0, "spent,spend,amount,cost,budget,adspend"],
+      ["leads", "Leads", 0, "leads,lead,enquiries,inquiries"],
+      ["note", "Campaign or note", 0, "campaign,note,notes,remarks"],
     ],
   },
 };
@@ -163,6 +181,35 @@ export function toISO(v: unknown): string | null {
   return null;
 }
 
+/** A month as yyyy-MM: "2026-09", "09/2026", "Sep 2026", "September 2026", or any date in it. "" when empty, null when unreadable. */
+export function toYM(v: unknown): string | null {
+  const s = String(v ?? "").trim();
+  if (!s) return "";
+  let m: RegExpMatchArray | null;
+  if ((m = s.match(/^(\d{4})[-/.](\d{1,2})$/))) return +m[2]! >= 1 && +m[2]! <= 12 ? `${m[1]}-${m[2]!.padStart(2, "0")}` : null;
+  if ((m = s.match(/^(\d{1,2})[-/.](\d{4})$/))) return +m[1]! >= 1 && +m[1]! <= 12 ? `${m[2]}-${m[1]!.padStart(2, "0")}` : null;
+  if ((m = s.match(/^([a-z]{3,9})[\s\-',]*(\d{2}|\d{4})$/i))) {
+    const i = MONTHS.findIndex((x) => m![1]!.toLowerCase().startsWith(x));
+    if (i < 0) return null;
+    const y = m[2]!.length === 2 ? 2000 + +m[2]! : +m[2]!;
+    return `${y}-${String(i + 1).padStart(2, "0")}`;
+  }
+  const d = toISO(s);
+  return d ? d.slice(0, 7) : null;
+}
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+
+/**
+ * What identifies a ledger row for spotting one imported twice: the same kind,
+ * day, amount, client and description. Two genuinely separate payments that
+ * match on all five are rare; a sheet imported a second time matches on every row.
+ */
+export const ledgerKey = (e: { type: string; date: string; paise: number; clientId: string | null; desc: string }) =>
+  [e.type, e.date, e.paise, e.clientId ?? "", nrm(e.desc)].join("|");
+
+/** The same for ad spend: person, month, amount and leads. */
+export const adKey = (a: { memberId: string; month: string; paise: number; leads: number }) => [a.memberId, a.month, a.paise, a.leads].join("|");
+
 /** A number, ignoring currency marks and grouping. null when empty, NaN when unreadable. */
 export function toNum(v: unknown): number | null {
   if (v == null || String(v).trim() === "") return null;
@@ -199,6 +246,10 @@ export type ImportData = {
   team: { id: string; name: string; email: string | null }[];
   clients: { id: string; name: string; company: string; brandId: string }[];
   brands: { id: string; name: string }[];
+  /** ledgerKey of every entry already recorded, to refuse importing one twice. */
+  ledgerKeys?: Set<string>;
+  /** adKey of every ad spend already recorded. */
+  adKeys?: Set<string>;
 };
 
 export type ImportOptions = { mkClients: boolean; mkMembers: boolean };
@@ -228,6 +279,14 @@ export type ClientRec = {
   contact: string;
   since: string;
   cur: string | null;
+  /** Credited with the sale: an existing member, or a name to add. */
+  seller: string | null;
+  newSeller: string | null;
+  onboarder: string | null;
+  newOnboarder: string | null;
+  loginId: string;
+  phone: string;
+  details: string;
 };
 export type TeamRec = {
   name: string;
@@ -251,6 +310,8 @@ export type LedgerRec = {
   status: "paid" | "pending";
   cur: string | null;
   orig: number | null;
+  /** Whose it is - a salary, a commission, a sale. */
+  member: string | null;
 };
 export type LeaveRec = {
   who: string;
@@ -260,7 +321,15 @@ export type LeaveRec = {
   note: string;
   status: "pending" | "approved" | "declined";
 };
-export type Rec = TaskRec | ClientRec | TeamRec | LedgerRec | LeaveRec;
+export type AdRec = {
+  who: string;
+  /** yyyy-MM */
+  month: string;
+  amount: number;
+  leads: number;
+  note: string;
+};
+export type Rec = TaskRec | ClientRec | TeamRec | LedgerRec | LeaveRec | AdRec;
 
 export type CheckedRow = {
   /** Spreadsheet row number, counting the header as row 1. */
@@ -381,6 +450,19 @@ export function checkRows(
       if (v.brand && !b) info.push(`new brand ${v.brand}`);
       const cur = (v.cur ?? "").toUpperCase();
       if (cur && !CURS.includes(cur)) errs.push("Currency must be INR, USD, USDT or USDC");
+      const person = (label: string, val: string | undefined): [string | null, string | null] => {
+        if (!val) return [null, null];
+        const p = findPerson(val);
+        if (p) return [p.id, null];
+        if (opts.mkMembers) {
+          info.push(`new member ${val}`);
+          return [null, val];
+        }
+        errs.push(`${label} “${val}” is not on the team`);
+        return [null, null];
+      };
+      const [seller, newSeller] = person("Sales person", v.seller);
+      const [onboarder, newOnboarder] = person("Onboarder", v.onboarder);
       rec = {
         name,
         company: v.company || name,
@@ -391,6 +473,13 @@ export function checkRows(
         contact: v.contact || "Not set",
         since: since || data.today,
         cur: cur && cur !== "INR" && CURS.includes(cur) ? cur : null,
+        seller,
+        newSeller,
+        onboarder,
+        newOnboarder,
+        loginId: v.login ?? "",
+        phone: v.phone ?? "",
+        details: v.details ?? "",
       } satisfies ClientRec;
     }
 
@@ -451,6 +540,16 @@ export function checkRows(
       const orig = toNum(v.orig);
       if (cur && !CURS.includes(cur)) errs.push("Currency must be INR, USD, USDT or USDC");
       if (Number.isNaN(orig)) errs.push("Currency amount is not a number");
+      let member: string | null = null;
+      if (v.member) {
+        const p = findPerson(v.member);
+        if (p) member = p.id;
+        else errs.push(`“${v.member}” is not on the team`);
+      }
+      if (d && t && amt && !Number.isNaN(amt) && !newClient && data.ledgerKeys) {
+        const key = ledgerKey({ type: t, date: d, paise: Math.round(amt * 100), clientId: client, desc: v.desc ?? "" });
+        if (data.ledgerKeys.has(key)) errs.push("Already in the ledger");
+      }
       const sl = (v.status ?? "").toLowerCase();
       const fx = t === "in" && cur && cur !== "INR" && CURS.includes(cur) && orig && !Number.isNaN(orig);
       rec = {
@@ -464,6 +563,7 @@ export function checkRows(
         status: /pend|due|unpaid|await/.test(sl) ? "pending" : "paid",
         cur: fx ? cur : null,
         orig: fx ? orig : null,
+        member,
       } satisfies LedgerRec;
     }
 
@@ -485,6 +585,28 @@ export function checkRows(
         note: v.note || "No note",
         status: /approv|yes|granted/.test(sl) ? "approved" : /declin|reject|no$/.test(sl) ? "declined" : "pending",
       } satisfies LeaveRec;
+    }
+
+    if (type === "ads") {
+      const p = v.who ? findPerson(v.who) : undefined;
+      if (!v.who) errs.push("No person");
+      else if (!p) errs.push(`“${v.who}” is not on the team`);
+      const month = toYM(v.month);
+      if (!month) errs.push(month === null ? "Month not readable" : "No month");
+      const amt = toNum(v.amount);
+      const leads = toNum(v.leads);
+      if (Number.isNaN(amt) || (amt !== null && amt < 0)) errs.push("Spent is not an amount");
+      if (Number.isNaN(leads) || (leads !== null && (leads < 0 || !Number.isInteger(leads)))) errs.push("Leads is not a whole number");
+      const amount = amt && !Number.isNaN(amt) && amt > 0 ? amt : 0;
+      const n = leads && !Number.isNaN(leads) && leads > 0 ? leads : 0;
+      if (!amount && !n && !Number.isNaN(amt) && !Number.isNaN(leads)) errs.push("Neither spend nor leads");
+      if (p && month && data.adKeys?.has(adKey({ memberId: p.id, month, paise: Math.round(amount * 100), leads: n }))) {
+        errs.push("Already recorded");
+      }
+      const key = `${p?.id}|${month}|${amount}|${n}`;
+      if (p && month && seen.has(key)) errs.push("Duplicate in this file");
+      seen.add(key);
+      rec = { who: p?.id ?? "", month: month || "", amount, leads: n, note: v.note ?? "" } satisfies AdRec;
     }
 
     return {

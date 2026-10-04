@@ -4,12 +4,15 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { PRESETS, canEdit, canOverhead, grantKey, reaches, type Feature } from "@/lib/access";
-import { firstLink } from "@/lib/format";
+import { MNF, daysInMonth, firstLink } from "@/lib/format";
 import {
   IMP,
   IMPORT_TYPES,
   MAX_IMPORT_ROWS,
+  adKey,
   checkRows,
+  ledgerKey,
+  type AdRec,
   type ClientRec,
   type ImportType,
   type LeaveRec,
@@ -19,7 +22,8 @@ import {
 } from "@/lib/importer";
 import { mutate } from "@/lib/mutate";
 import type { Result } from "@/lib/types";
-import { toDate, toPaise } from "@/lib/workspace";
+import { asPerson, toDate, toPaise } from "@/lib/workspace";
+import { getSigned } from "@/lib/auth";
 import { parse } from "@/lib/action-helpers";
 
 const SECTION: Record<ImportType, Feature> = {
@@ -28,6 +32,7 @@ const SECTION: Record<ImportType, Feature> = {
   team: "team",
   ledger: "expenses",
   leave: "team",
+  ads: "ads",
 };
 
 const input = z.object({
@@ -65,12 +70,32 @@ export async function runImport(raw: z.input<typeof input>): Promise<Result<Impo
     ]);
     const visible = clients.filter((c) => ctx.reach.visibleClient(c.id));
 
+    // What is already recorded, so a sheet imported twice is not counted twice.
+    const ledgerKeys =
+      f.type === "ledger"
+        ? new Set(
+            (await tx.ledgerEntry.findMany({ select: { type: true, date: true, amount: true, clientId: true, description: true } })).map((e) =>
+              ledgerKey({ type: e.type, date: e.date.toISOString().slice(0, 10), paise: Number(e.amount), clientId: e.clientId, desc: e.description }),
+            ),
+          )
+        : undefined;
+    const adKeys =
+      f.type === "ads"
+        ? new Set(
+            (await tx.adSpend.findMany({ select: { memberId: true, month: true, amount: true, leads: true } })).map((a) =>
+              adKey({ memberId: a.memberId, month: a.month.toISOString().slice(0, 7), paise: Number(a.amount), leads: a.leads }),
+            ),
+          )
+        : undefined;
+
     const checked = checkRows(f.type, f.rows, f.map, f, {
       meId: ctx.me.id,
       today: ctx.today,
       team: members.map((m) => ({ id: m.id, name: m.name, email: m.email })),
       clients: visible.map((c) => ({ id: c.id, name: c.name, company: c.company, brandId: c.brandId })),
       brands: brands.map((b) => ({ id: b.id, name: b.name })),
+      ledgerKeys,
+      adKeys,
     });
     const ready = checked.filter((r) => r.ok && r.rec);
     if (!ready.length) ctx.fail("No rows are ready to import.");
@@ -97,7 +122,9 @@ export async function runImport(raw: z.input<typeof input>): Promise<Result<Impo
     const clientByName = new Map(clients.map((c) => [c.name.toLowerCase(), c]));
     const clientBrand = (cid: string) => [...clientByName.values()].find((c) => c.id === cid)?.brandId ?? null;
     const financeTeam = members.filter((m) => !m.isOwner && canEdit({ id: m.id, isOwner: false, features: (m.features ?? {}) as never }, "expenses"));
-    const clientOf = async (name: string, brandId: string, extra?: Partial<Prisma.ClientUncheckedCreateInput>): Promise<string> => {
+    // `assigned` are the people credited with the client - its seller and
+    // onboarder. They get Edit on it, as the WabMeta sync gives them.
+    const clientOf = async (name: string, brandId: string, extra?: Partial<Prisma.ClientUncheckedCreateInput>, assigned: string[] = []): Promise<string> => {
       const hit = clientByName.get(name.toLowerCase());
       if (hit) {
         if (!ctx.reach.visibleClient(hit.id)) ctx.fail(`A client called “${name}” exists but you have no access to it. Ask an owner.`);
@@ -112,6 +139,10 @@ export async function runImport(raw: z.input<typeof input>): Promise<Result<Impo
         ...financeTeam.map((m) => ({ memberId: m.id, level: "finance" })),
         ...(!ctx.person.isOwner && !financeTeam.some((m) => m.id === ctx.me.id) ? [{ memberId: ctx.me.id, level: "edit" }] : []),
       ];
+      for (const mid of new Set(assigned)) {
+        const who = members.find((m) => m.id === mid);
+        if (who && !who.isOwner && !grants.some((g) => g.memberId === mid)) grants.push({ memberId: mid, level: "edit" });
+      }
       if (grants.length) await tx.clientGrant.createMany({ data: grants.map((g) => ({ tenantId: T, clientId: c.id, ...g })) });
       for (const g of grants) (ctx.reach.grants as Map<string, string>).set(grantKey(g.memberId, c.id), g.level);
       return c.id;
@@ -149,6 +180,7 @@ export async function runImport(raw: z.input<typeof input>): Promise<Result<Impo
         },
       });
       memberByName.set(r.name.toLowerCase(), m.id);
+      members.push(m);
       made.people++;
       return m.id;
     };
@@ -206,7 +238,12 @@ export async function runImport(raw: z.input<typeof input>): Promise<Result<Impo
       for (const { rec } of ready) {
         const r = rec as ClientRec;
         const brandId = r.newBrand ? await brandOf(r.newBrand) : (r.brand ?? (await brandOf(null)));
-        await clientOf(r.name, brandId, {
+        const seller = r.newSeller ? await memberOf({ name: r.newSeller }) : r.seller;
+        const onboarder = r.newOnboarder ? await memberOf({ name: r.newOnboarder }) : r.onboarder;
+        await clientOf(
+          r.name,
+          brandId,
+          {
           company: r.company,
           retainer: toPaise(r.retainer),
           services: r.services,
@@ -214,7 +251,14 @@ export async function runImport(raw: z.input<typeof input>): Promise<Result<Impo
           sinceDate: toDate(r.since),
           currency: r.cur ?? "INR",
           ...(r.retainer > 0 ? { rates: { create: { tenantId: T, fromDate: toDate(r.since), amount: toPaise(r.retainer), currency: "INR" } } } : {}),
-        });
+            ownerMemberId: seller,
+            onboarderMemberId: onboarder,
+            loginId: r.loginId,
+            phone: r.phone,
+            details: r.details,
+          },
+          [seller, onboarder].filter((x): x is string => !!x),
+        );
         imported++;
       }
     }
@@ -250,6 +294,7 @@ export async function runImport(raw: z.input<typeof input>): Promise<Result<Impo
           status: r.status,
           currency: r.cur,
           origAmount: r.orig != null ? toPaise(r.orig) : null,
+          memberId: r.member,
           createdById: ctx.me.id,
         });
         (r.type === "in" ? inc : exp).add(r.cat);
@@ -268,12 +313,46 @@ export async function runImport(raw: z.input<typeof input>): Promise<Result<Impo
       imported = leaves.length;
     }
 
+    if (f.type === "ads") {
+      // As recording one by hand does: the spend is an expense under Ads, in
+      // its month, and the ad spend row points at it.
+      const exp = new Set(tenant.expenseCategories);
+      for (const { rec } of ready) {
+        const r = rec as AdRec;
+        const who = members.find((m) => m.id === r.who)!;
+        let ledgerEntryId: string | null = null;
+        if (r.amount > 0) {
+          const day = r.month === ctx.today.slice(0, 7) ? ctx.today : `${r.month}-${String(Math.min(28, daysInMonth(r.month))).padStart(2, "0")}`;
+          const e = await tx.ledgerEntry.create({
+            data: {
+              tenantId: T,
+              type: "out",
+              date: toDate(day),
+              description: `Ads for ${who.name}, ${MNF[Number(r.month.slice(5)) - 1]}${r.note ? ` - ${r.note}` : ""}`,
+              category: "Ads",
+              amount: toPaise(r.amount),
+              status: "paid",
+              memberId: who.id,
+              createdById: ctx.me.id,
+            },
+          });
+          ledgerEntryId = e.id;
+          exp.add("Ads");
+        }
+        await tx.adSpend.create({
+          data: { tenantId: T, memberId: who.id, month: toDate(`${r.month}-01`), amount: toPaise(r.amount), leads: r.leads, note: r.note, ledgerEntryId, createdById: ctx.me.id },
+        });
+        imported++;
+      }
+      if (exp.size !== tenant.expenseCategories.length) await tx.tenant.update({ where: { id: T }, data: { expenseCategories: [...exp] } });
+    }
+
     const label = IMP[f.type].label.toLowerCase();
     await ctx.log({
-      kind: f.type === "tasks" ? "task" : f.type === "clients" ? "client" : f.type === "ledger" ? "expense" : "team",
+      kind: f.type === "tasks" ? "task" : f.type === "clients" ? "client" : f.type === "ledger" || f.type === "ads" ? "expense" : "team",
       text: `imported ${imported} ${label} from ${f.fileName || "pasted rows"}`,
       target: "Import",
-      area: f.type === "team" || f.type === "leave" ? "team" : "import",
+      area: f.type === "team" || f.type === "leave" ? "team" : f.type === "ads" ? "ledger" : "import",
       to: `${imported} rows`,
     });
 
@@ -288,4 +367,34 @@ export async function runImport(raw: z.input<typeof input>): Promise<Result<Impo
       data: { n: imported, skipped: f.rows.length - imported, extra },
     };
   }, { timeout: 120_000 });
+}
+
+const SHEET_ID = /^[a-zA-Z0-9_-]{20,100}$/;
+
+/**
+ * A Google Sheet shared as "anyone with the link", read as CSV. Done here
+ * rather than in the browser, which Google refuses to answer across origins.
+ * Only Google's own export URL is ever requested, built from the sheet id, so
+ * this cannot be pointed anywhere else. No transaction: it only reads from
+ * Google, and holding a database connection through a download is waste.
+ */
+export async function readSheetLink(raw: { url: string }): Promise<Result<{ text: string }>> {
+  const signed = await getSigned();
+  if (!signed) return { ok: false, error: "Your session has ended. Please log in again." };
+  if (signed.previewing || !canEdit(asPerson(signed.me), "import")) return { ok: false, error: "Importing needs Edit access on Import." };
+  const url = String(raw?.url ?? "");
+  const sheetId = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/)?.[1];
+  if (!sheetId || !SHEET_ID.test(sheetId)) return { ok: false, error: "Paste a Google Sheets link, the one from your browser address bar." };
+  const gid = url.match(/[#&?]gid=(\d{1,15})/)?.[1];
+  const res = await fetch(`https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv${gid ? `&gid=${gid}` : ""}`, {
+    redirect: "follow",
+    signal: AbortSignal.timeout(20_000),
+    cache: "no-store",
+  }).catch(() => null);
+  const text = res?.ok ? await res.text() : "";
+  if (!text || /^\s*</.test(text)) {
+    return { ok: false, error: "Couldn't read that sheet. Share it as Anyone with the link can view, or download it as CSV or Excel and upload the file." };
+  }
+  if (text.length > 8_000_000) return { ok: false, error: "That sheet is too big to read at once. Split it, or upload it as a file." };
+  return { ok: true, data: { text } };
 }
