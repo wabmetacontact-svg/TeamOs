@@ -246,6 +246,22 @@ export type AdSpendW = {
   byId: string;
 };
 
+/** A month's sales target, for the team (memberId null) or one person. */
+export type TargetW = {
+  id: string;
+  memberId: string | null;
+  /** yyyy-MM */
+  month: string;
+  /** New clients. */
+  sales: number | null;
+  /** Rupees received. */
+  amount: number | null;
+  dailySales: number | null;
+  /** Rupees. */
+  dailyAmount: number | null;
+  byId: string;
+};
+
 export type Workspace = {
   tenant: TenantW;
   /** The signed-in person. */
@@ -269,6 +285,8 @@ export type Workspace = {
   commissionRules: CommissionRuleW[];
   /** Empty unless the viewer can see overhead money. */
   adSpends: AdSpendW[];
+  /** Empty unless the viewer has the Targets section. */
+  targets: TargetW[];
 };
 
 /** The collections a change can touch, by name. */
@@ -289,6 +307,7 @@ export type Collections = Pick<
   | "commissionRates"
   | "commissionRules"
   | "adSpends"
+  | "targets"
 >;
 
 /** What an action sends back: the records it changed, applied in place. */

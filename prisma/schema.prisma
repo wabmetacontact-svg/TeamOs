@@ -72,6 +72,7 @@ model Tenant {
   commissionRates CommissionRate[]
   commissionRules CommissionRule[]
   adSpends        AdSpend[]
+  targets         Target[]
 
   @@map("tenants")
 }
@@ -153,6 +154,7 @@ model Member {
   commissionRates CommissionRate[]
   commissionRules CommissionRule[]
   adSpends        AdSpend[]
+  targets         Target[]
 
   @@unique([tenantId, email])
   @@unique([tenantId, externalId])
@@ -292,6 +294,35 @@ model AdSpend {
   @@index([tenantId])
   @@index([memberId])
   @@map("ad_spends")
+}
+
+/// A sales target for a month: for the whole team (memberId null) or for one
+/// person. Only the targets are stored - what was achieved is counted from the
+/// clients and money WabMeta syncs, so it cannot drift from them.
+/// One per person (or team) per month, enforced by a unique index in the
+/// migration that treats a null memberId as a value (NULLS NOT DISTINCT).
+model Target {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  memberId    String?
+  member      Member?  @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  /// The 1st of the month.
+  month       DateTime @db.Date
+  /// New clients to bring in this month.
+  sales       Int?
+  /// Paise to receive this month.
+  amount      BigInt?
+  /// Per day, for the week and today views.
+  dailySales  Int?
+  dailyAmount BigInt?
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([memberId])
+  @@map("targets")
 }
 
 /// A company the workspace runs. An agency brand works for clients; a startup

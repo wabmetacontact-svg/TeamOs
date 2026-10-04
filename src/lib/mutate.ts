@@ -37,7 +37,7 @@ export type AuditInput = {
   text: string;
   target: string;
   clientId?: string | null;
-  area?: "team" | "payroll" | "ledger" | "access" | "tasks" | "import" | "brands" | null;
+  area?: "team" | "payroll" | "ledger" | "access" | "tasks" | "import" | "brands" | "targets" | null;
   from?: string;
   to?: string;
 };
