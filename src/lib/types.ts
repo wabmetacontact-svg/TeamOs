@@ -82,6 +82,20 @@ export type ClientW = {
   ownerId: string | null;
   /** Who is onboarding it, when somebody is. */
   onboarderId: string | null;
+  /**
+   * Mirrored from WabMeta. Its name, contact, monthly figure and start date
+   * belong to WabMeta and are overwritten by the next sync, so they are not
+   * edited here.
+   */
+  synced: boolean;
+  /** The organization's id in WabMeta, for synced clients. */
+  wabmetaId: string | null;
+  loginId: string;
+  phone: string;
+  plan: string;
+  details: string;
+  /** Whether a password is stored. The password itself is never in the workspace. */
+  hasPassword: boolean;
 };
 
 /** id is "memberId:clientId". */

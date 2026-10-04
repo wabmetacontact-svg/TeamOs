@@ -30,6 +30,13 @@ const client = (
   rates: [],
   ownerId,
   onboarderId,
+  synced: false,
+  wabmetaId: null,
+  loginId: "",
+  phone: "",
+  plan: "",
+  details: "",
+  hasPassword: false,
 });
 
 const entry = (over: Partial<EntryW> & { clientId: string | null }): EntryW => ({

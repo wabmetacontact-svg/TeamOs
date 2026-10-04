@@ -307,24 +307,30 @@ function specFor(ops: Ops, type: ModalType, f: Form): Spec {
 
   if (type === "client" || type === "editClient") {
     const fin = type === "client" || (f.id ? m.can(f.id, "finance") : false);
+    // A client from WabMeta gets its name, company, contact, monthly figure and
+    // start date from there; the next sync would undo an edit to them, so the
+    // form leaves them out rather than accept a change that will not stick.
+    const synced = type === "editClient" && !!f.id && !!m.C(f.id)?.synced;
     return {
       title: type === "client" ? "New client" : "Edit client profile",
       submit: type === "client" ? "Add client" : "Save changes",
       fields: [
-        { name: "name", label: "Client name", ph: "e.g. Northwind Foods", full: type === "client" },
-        ...(type === "editClient" ? [{ name: "company", label: "Company" }] : []),
+        ...(synced ? [] : [{ name: "name", label: "Client name", ph: "e.g. Northwind Foods", full: type === "client" }]),
+        ...(type === "editClient" && !synced ? [{ name: "company", label: "Company" }] : []),
         { name: "brand", label: "Brand", options: brandOpts, add: { label: "brand", kind: "brand" } },
         ...(type === "client" ? [{ name: "company", label: "Company", ph: "Legal or trading name" }] : []),
-        ...(fin ? [{ name: "retainer", label: "Monthly retainer (₹)", ph: "e.g. 150000" }] : []),
-        { name: "sinceDate", label: "Onboard date", type: "date" },
+        ...(fin && !synced ? [{ name: "retainer", label: "Monthly retainer (₹)", ph: "e.g. 150000" }] : []),
+        ...(synced ? [] : [{ name: "sinceDate", label: "Onboard date", type: "date" }]),
         { name: "payDay", label: "Paid date", options: PAYDAYS },
         { name: "services", label: "Services provided", ph: "e.g. LinkedIn and X management", full: true },
-        { name: "contact", label: "Main contact", ph: "Name", full: true },
+        ...(synced ? [] : [{ name: "contact", label: "Main contact", ph: "Name", full: true }]),
       ],
       note:
         type === "client"
           ? "Team members start with no access to a new client. Whoever runs the books keeps Finance access."
-          : "Changes are recorded in the audit trail.",
+          : synced
+            ? "Name, contact, monthly figure and start date come from WabMeta - change them there. Changes here are recorded in the audit trail."
+            : "Changes are recorded in the audit trail.",
     };
   }
 

@@ -12,8 +12,9 @@ import { openTask } from "../overlays";
 import { useOps } from "../store";
 import { Section, Tabs, TextLink } from "../ui";
 import { atLabel } from "./dashboard";
+import { ClientAccount } from "./client-account";
 
-type Tab = "overview" | "expenses" | "tasks" | "access" | "history";
+type Tab = "overview" | "account" | "expenses" | "tasks" | "access" | "history";
 
 export function ClientView({ id }: { id: string }) {
   const ops = useOps();
@@ -101,6 +102,7 @@ export function ClientView({ id }: { id: string }) {
         onPick={setTab}
         tabs={[
           ["overview", "Overview"],
+          ["account", "Account"],
           ["expenses", "Money"],
           ["tasks", `Tasks (${tasks.length})`],
           ["access", "Access"],
@@ -153,6 +155,9 @@ export function ClientView({ id }: { id: string }) {
           </Section>
         </div>
       )}
+
+      {/* Keyed on the client so switching clients resets the form, not just its values. */}
+      {tab === "account" && <ClientAccount key={c.id} c={c} />}
 
       {tab === "expenses" &&
         (f ? (

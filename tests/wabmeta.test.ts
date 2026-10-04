@@ -339,6 +339,43 @@ describe("a sale handed to an onboarder", () => {
   });
 });
 
+describe("the client's account from WabMeta", () => {
+  const ACC = `acc-${suffix}`;
+
+  test("login, phone and plan arrive with the client", async () => {
+    const [r] = await applyEvents(tenantId, [
+      client({ externalId: ACC, name: "Account Co", loginId: "owner@account.test", phone: "+91 90000 00000", plan: "Growth" }),
+    ]);
+    expect(r).toMatchObject({ status: "applied" });
+    const row = await owner.client.findFirstOrThrow({ where: { tenantId, externalId: ACC } });
+    expect(row).toMatchObject({ loginId: "owner@account.test", phone: "+91 90000 00000", plan: "Growth" });
+  });
+
+  test("a plan change is a change", async () => {
+    const [r] = await applyEvents(tenantId, [
+      client({ externalId: ACC, name: "Account Co", loginId: "owner@account.test", phone: "+91 90000 00000", plan: "Pro" }),
+    ]);
+    expect(r).toMatchObject({ status: "applied" });
+    expect((await owner.client.findFirstOrThrow({ where: { tenantId, externalId: ACC } })).plan).toBe("Pro");
+  });
+
+  test("a sender that does not send them leaves them alone", async () => {
+    // An older WabMeta, or one that never knew the login, must not blank it.
+    await applyEvents(tenantId, [client({ externalId: ACC, name: "Account Co" })]);
+    const row = await owner.client.findFirstOrThrow({ where: { tenantId, externalId: ACC } });
+    expect(row.loginId).toBe("owner@account.test");
+    expect(row.plan).toBe("Pro");
+  });
+
+  test("and never touches the notes or the password, which are TeamOS's own", async () => {
+    await owner.client.updateMany({ where: { tenantId, externalId: ACC }, data: { details: "kept", passwordEnc: "v1:x:y:z" } });
+    await applyEvents(tenantId, [client({ externalId: ACC, name: "Account Co Renamed", plan: "Starter" })]);
+    const row = await owner.client.findFirstOrThrow({ where: { tenantId, externalId: ACC } });
+    expect(row.details).toBe("kept");
+    expect(row.passwordEnc).toBe("v1:x:y:z");
+  });
+});
+
 describe("money", () => {
   test("a payment lands against its client, in paise", async () => {
     const [r] = await applyEvents(tenantId, [payment()]);

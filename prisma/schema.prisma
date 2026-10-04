@@ -264,6 +264,21 @@ model Client {
   onboarderMemberId String?
   onboarder         Member? @relation("ClientOnboarder", fields: [onboarderMemberId], references: [id], onDelete: SetNull)
 
+  // ── the client's account
+  /// The login the client signs in with - their email in WabMeta. Mirrored
+  /// from WabMeta for synced clients; typed in here for the rest.
+  loginId       String    @default("")
+  phone         String    @default("")
+  /// The plan they are on in WabMeta. Mirrored only.
+  plan          String    @default("")
+  /// Free notes about the client. Owned by TeamOS: the sync never writes it.
+  details       String    @default("")
+  /// The client's password, if an owner chose to keep it here - encrypted with
+  /// CLIENT_VAULT_KEY (src/lib/vault.ts), never sent to the browser with the
+  /// workspace, and decrypted only on an owner's request, which is audited.
+  passwordEnc   String?
+  passwordSetAt DateTime?
+
   rates  ClientRate[]
   grants ClientGrant[]
   ledger LedgerEntry[]

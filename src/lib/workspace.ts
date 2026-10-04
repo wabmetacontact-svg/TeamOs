@@ -164,6 +164,15 @@ export function mapClient(c: Client, ctx: MapCtx, rates: ClientRate[] = []): Cli
     payDay: c.payDay,
     ownerId: c.ownerMemberId,
     onboarderId: c.onboarderMemberId,
+    synced: c.externalSource !== null,
+    wabmetaId: c.externalSource === "wabmeta" && c.externalId?.startsWith("org:") ? c.externalId.slice(4) : null,
+    loginId: c.loginId,
+    phone: c.phone,
+    plan: c.plan,
+    details: c.details,
+    // Only that it exists. passwordEnc is deliberately not mapped: this object
+    // is sent to the browser on every page load.
+    hasPassword: c.passwordEnc !== null,
     rates: fin
       ? rates
           .filter((r) => r.clientId === c.id)
