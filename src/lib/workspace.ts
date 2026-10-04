@@ -1,5 +1,6 @@
 import "server-only";
 import type {
+  AdSpend,
   AuditEntry,
   Brand,
   Client,
@@ -36,6 +37,7 @@ import {
 import { nowIn, todayIn } from "./format";
 import { occurrencesThrough, type Rule } from "./recurrence";
 import type {
+  AdSpendW,
   AuditW,
   BrandW,
   ClientW,
@@ -111,6 +113,17 @@ export const mapCommissionRate = (r: CommissionRate): CommissionRateW => ({
   memberId: r.memberId,
   from: dateOnly(r.effectiveFrom)!,
   bps: r.bps,
+});
+
+export const mapAdSpend = (a: AdSpend): AdSpendW => ({
+  id: a.id,
+  memberId: a.memberId,
+  month: dateOnly(a.month)!.slice(0, 7),
+  amount: rupees(a.amount),
+  leads: a.leads,
+  note: a.note,
+  ledgerEntryId: a.ledgerEntryId,
+  byId: a.createdById,
 });
 
 export const mapCommissionRule = (r: CommissionRule): CommissionRuleW => ({
@@ -445,7 +458,7 @@ export async function loadWorkspace(signed: Signed): Promise<Workspace> {
   const viewer = asPerson(viewerRow);
   const r = reachOf(viewer, grantMap(grantRows));
 
-  const [members, salaries, brands, clients, rates, ledger, depts, tasks, series, cols, leaves, holidays, audit, commissionRates, commissionRules] =
+  const [members, salaries, brands, clients, rates, ledger, depts, tasks, series, cols, leaves, holidays, audit, commissionRates, commissionRules, adSpends] =
     await Promise.all([
       db.member.findMany({ orderBy: [{ isOwner: "desc" }, { createdAt: "asc" }] }),
       r.payroll ? db.salaryChange.findMany() : Promise.resolve([]),
@@ -463,6 +476,8 @@ export async function loadWorkspace(signed: Signed): Promise<Workspace> {
       // What somebody is paid is Payroll's business, like their salary.
       r.payroll ? db.commissionRate.findMany({ orderBy: { effectiveFrom: "asc" } }) : Promise.resolve([]),
       r.payroll ? db.commissionRule.findMany({ orderBy: { createdAt: "asc" } }) : Promise.resolve([]),
+      // Ad spend is overhead money - no client - so it follows the overhead rule.
+      canOverhead(viewer) ? db.adSpend.findMany({ orderBy: { createdAt: "asc" } }) : Promise.resolve([]),
     ]);
 
   const ctx: MapCtx = { tz, payroll: r.payroll, finance: r.financeClient };
@@ -490,5 +505,6 @@ export async function loadWorkspace(signed: Signed): Promise<Workspace> {
       .map((a) => mapAudit(a, tz)),
     commissionRates: commissionRates.map(mapCommissionRate),
     commissionRules: commissionRules.map(mapCommissionRule),
+    adSpends: adSpends.map(mapAdSpend),
   };
 }

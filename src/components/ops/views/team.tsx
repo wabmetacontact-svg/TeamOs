@@ -5,12 +5,13 @@ import { dLabel, dLong, dayDiff, initials, inr, inrShort, ymAdd, ymLabel } from 
 import { decideLeave, removeHrDept } from "@/app/(app)/actions/team";
 import { paySalary, payAllSalaries } from "@/app/(app)/actions/ledger";
 import { salesByMember, unownedClients } from "@/lib/sales";
+import { Ads } from "./ads";
 import { Commissions } from "./commissions";
 import { openModal } from "../modals";
 import { useOps, useWide } from "../store";
 import { CardGrid, Chip, DashedAdd, LockNotice, MonthNav, StatCard, Tabs, TextLink } from "../ui";
 
-type Tab = "members" | "kpi" | "sales" | "payroll";
+type Tab = "members" | "kpi" | "sales" | "ads" | "payroll";
 
 export function TeamView() {
   const ops = useOps();
@@ -45,12 +46,14 @@ export function TeamView() {
           ["members", "Members"],
           ["kpi", "KPIs"],
           ["sales", "Sales"],
+          ["ads", "Ads"],
           ["payroll", "Payroll"],
         ]}
       />
       {tab === "members" && <Members />}
       {tab === "kpi" && <Kpis />}
       {tab === "sales" && <Sales />}
+      {tab === "ads" && <Ads />}
       {tab === "payroll" && <Payroll />}
     </>
   );

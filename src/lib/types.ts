@@ -215,6 +215,20 @@ export type CommissionRuleW = {
   byId: string;
 };
 
+/** Ads run for a person in a month. Sent only to whoever can see overhead money. */
+export type AdSpendW = {
+  id: string;
+  memberId: string;
+  /** yyyy-MM */
+  month: string;
+  /** Rupees. */
+  amount: number;
+  leads: number;
+  note: string;
+  ledgerEntryId: string | null;
+  byId: string;
+};
+
 export type Workspace = {
   tenant: TenantW;
   /** The signed-in person. */
@@ -236,6 +250,8 @@ export type Workspace = {
   /** Empty unless the viewer has Payroll. */
   commissionRates: CommissionRateW[];
   commissionRules: CommissionRuleW[];
+  /** Empty unless the viewer can see overhead money. */
+  adSpends: AdSpendW[];
 };
 
 /** The collections a change can touch, by name. */
@@ -255,6 +271,7 @@ export type Collections = Pick<
   | "audit"
   | "commissionRates"
   | "commissionRules"
+  | "adSpends"
 >;
 
 /** What an action sends back: the records it changed, applied in place. */

@@ -71,6 +71,7 @@ model Tenant {
   audit           AuditEntry[]
   commissionRates CommissionRate[]
   commissionRules CommissionRule[]
+  adSpends        AdSpend[]
 
   @@map("tenants")
 }
@@ -151,6 +152,7 @@ model Member {
   clientsOnboarding Client[]        @relation("ClientOnboarder")
   commissionRates CommissionRate[]
   commissionRules CommissionRule[]
+  adSpends        AdSpend[]
 
   @@unique([tenantId, email])
   @@unique([tenantId, externalId])
@@ -262,6 +264,34 @@ model CommissionRule {
   @@index([tenantId])
   @@index([memberId])
   @@map("commission_rules")
+}
+
+/// Ads run for one person in one month, and the leads they brought.
+///
+/// The money is also an expense in ledger_entries (category "Ads"), written in
+/// the same transaction and removed with it - the ledger stays the one place
+/// money lives, so the month's profit already counts ad spend. This row adds
+/// what the ledger cannot hold: whose leads they were, and how many.
+model AdSpend {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  memberId      String
+  member        Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  /// The 1st of the month the ads ran in.
+  month         DateTime @db.Date
+  /// Paise. Zero is allowed: leads that cost nothing still count as leads.
+  amount        BigInt   @default(0)
+  leads         Int      @default(0)
+  note          String   @default("")
+  /// The expense this spend wrote, if it cost anything.
+  ledgerEntryId String?
+  createdById   String
+  createdAt     DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([memberId])
+  @@map("ad_spends")
 }
 
 /// A company the workspace runs. An agency brand works for clients; a startup
