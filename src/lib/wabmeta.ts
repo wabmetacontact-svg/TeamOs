@@ -127,8 +127,16 @@ export const clientEvent = z.object({
   since: dayString.nullish(),
   /** The plan plus monthly add-ons, in paise. */
   retainerPaise: paise.nonnegative().nullish(),
-  /** The onboarder's WabMeta id. An unknown id leaves the client unowned. */
+  /**
+   * Who brought the client in - the sales person who sold it, or the onboarder
+   * who created it alone. An unknown id leaves the client unowned.
+   */
   ownerExternalId: z.string().nullish(),
+  /**
+   * Who is onboarding it, once a sale has been handed over. Optional on the
+   * wire, so a sender that predates the field keeps working.
+   */
+  onboarderExternalId: z.string().nullish(),
   /** True once the organization is closed or deleted over there. */
   removed: z.boolean().nullish(),
 });
@@ -322,6 +330,13 @@ async function applyClient(tx: Tx, tenantId: string, e: ClientEvent): Promise<Ev
     : null;
   const ownerMemberId = owner?.id ?? null;
 
+  // Same rule as the owner: an onboarder who has not arrived yet leaves the
+  // field empty, and the next client event fills it.
+  const onboarder = e.onboarderExternalId
+    ? await tx.member.findFirst({ where: { externalId: e.onboarderExternalId }, select: { id: true } })
+    : null;
+  const onboarderMemberId = onboarder?.id ?? null;
+
   const existing = await tx.client.findFirst({ where: { externalId: e.externalId } });
   const removedAt = e.removed ? (existing?.removedAt ?? new Date()) : null;
 
@@ -332,12 +347,13 @@ async function applyClient(tx: Tx, tenantId: string, e: ClientEvent): Promise<Ev
       existing.contact === contact &&
       existing.retainer === retainer &&
       existing.ownerMemberId === ownerMemberId &&
+      existing.onboarderMemberId === onboarderMemberId &&
       (existing.removedAt === null) === (removedAt === null);
     if (same) return { id: e.id, status: "unchanged" };
 
     await tx.client.update({
       where: { id: existing.id },
-      data: { name, company, contact, retainer, sinceDate: since, ownerMemberId, removedAt },
+      data: { name, company, contact, retainer, sinceDate: since, ownerMemberId, onboarderMemberId, removedAt },
     });
     await log(tx, tenantId, {
       kind: "client",
@@ -359,6 +375,7 @@ async function applyClient(tx: Tx, tenantId: string, e: ClientEvent): Promise<Ev
       retainer,
       sinceDate: since,
       ownerMemberId,
+      onboarderMemberId,
       removedAt,
       externalSource: SOURCE,
       externalId: e.externalId,

@@ -103,6 +103,10 @@ export function ClientsView() {
                 )}
                 <span className="text-ink3">{c.services || "No services set"}</span>
                 <span>{m.brandName(c.brandId)}</span>
+                {/* Who sold it and who is setting it up - both, because after a
+                    handover they are usually two different people. */}
+                {c.ownerId && <span>Sales: {m.P(c.ownerId).name}</span>}
+                {c.onboarderId && c.onboarderId !== c.ownerId && <span>Onboarder: {m.P(c.onboarderId).name}</span>}
               </span>
             </span>
             <span className="flex flex-col items-end">

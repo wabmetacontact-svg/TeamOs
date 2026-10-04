@@ -30,6 +30,12 @@ export type SalesRow = {
   bookPerMonth: number;
   /** How many of their clients this viewer cannot see the money on. */
   hiddenClients: number;
+  /**
+   * Clients this person is onboarding, whoever sold them. Workload, not
+   * credit: an onboarder handed ten sales did not bring in ten clients, and
+   * their revenue above stays at what they sold themselves.
+   */
+  onboarding: number;
   tasksDone: number;
   tasksOverdue: number;
 };
@@ -50,27 +56,32 @@ export type SalesInput = {
 };
 
 /**
- * One row per person credited with at least one client, best first.
+ * One row per person who brought in a client or is onboarding one, best first.
  *
- * People with no clients are left out rather than listed with zeroes: a team of
- * thirty where two do sales should show two rows, not twenty-eight empty ones.
+ * People with neither are left out rather than listed with zeroes: a team of
+ * thirty where four sell and onboard should show four rows, not twenty-six
+ * empty ones.
  */
 export function salesByMember(input: SalesInput): SalesRow[] {
   const { members, clients, ledger, tasks, financeClientIds, inWindow, doneAt, lateDays } = input;
 
   const byOwner = new Map<string, ClientW[]>();
+  const onboardingCount = new Map<string, number>();
   for (const c of clients) {
-    if (!c.ownerId) continue;
-    const list = byOwner.get(c.ownerId);
-    if (list) list.push(c);
-    else byOwner.set(c.ownerId, [c]);
+    if (c.ownerId) {
+      const list = byOwner.get(c.ownerId);
+      if (list) list.push(c);
+      else byOwner.set(c.ownerId, [c]);
+    }
+    if (c.onboarderId) onboardingCount.set(c.onboarderId, (onboardingCount.get(c.onboarderId) ?? 0) + 1);
   }
 
   const rows: SalesRow[] = [];
 
   for (const member of members) {
-    const mine = byOwner.get(member.id);
-    if (!mine?.length) continue;
+    const mine = byOwner.get(member.id) ?? [];
+    const onboarding = onboardingCount.get(member.id) ?? 0;
+    if (!mine.length && !onboarding) continue;
 
     const ids = new Set(mine.map((c) => c.id));
     const received = ledger
@@ -93,14 +104,15 @@ export function salesByMember(input: SalesInput): SalesRow[] {
       received,
       bookPerMonth,
       hiddenClients,
+      onboarding,
       tasksDone,
       tasksOverdue,
     });
   }
 
-  // Most money first, then the biggest book - the order somebody reading a
-  // sales screen is looking for.
-  return rows.sort((a, b) => b.received - a.received || b.clients - a.clients);
+  // Most money first, then the biggest book, then the most onboarding work -
+  // the order somebody reading a sales screen is looking for.
+  return rows.sort((a, b) => b.received - a.received || b.clients - a.clients || b.onboarding - a.onboarding);
 }
 
 /** Clients credited to nobody, whose money therefore appears in no row above. */

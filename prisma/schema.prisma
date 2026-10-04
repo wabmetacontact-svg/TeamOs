@@ -142,6 +142,7 @@ model Member {
   leavesDecided   Leave[]           @relation("LeaveDecider")
   auditEntries    AuditEntry[]
   clientsOwned    Client[]          @relation("ClientOwner")
+  clientsOnboarding Client[]        @relation("ClientOnboarder")
 
   @@unique([tenantId, email])
   @@unique([tenantId, externalId])
@@ -257,6 +258,11 @@ model Client {
   /// client_grants, and the two are deliberately separate.
   ownerMemberId  String?
   owner          Member? @relation("ClientOwner", fields: [ownerMemberId], references: [id], onDelete: SetNull)
+  /// The team member onboarding the client - set up, plan, getting it live.
+  /// Often a different person from the owner: in WabMeta a sales person sells
+  /// the client and then hands it to an onboarder. The sale stays the owner's.
+  onboarderMemberId String?
+  onboarder         Member? @relation("ClientOnboarder", fields: [onboarderMemberId], references: [id], onDelete: SetNull)
 
   rates  ClientRate[]
   grants ClientGrant[]
@@ -267,6 +273,7 @@ model Client {
   @@unique([tenantId, externalId])
   @@index([tenantId])
   @@index([ownerMemberId])
+  @@index([onboarderMemberId])
   @@map("clients")
 }
 

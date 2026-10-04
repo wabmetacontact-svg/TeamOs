@@ -404,7 +404,8 @@ function Sales() {
                 ["Per month", inrShort(r.bookPerMonth)],
                 ["Tasks done", String(r.tasksDone)],
                 ["Overdue", String(r.tasksOverdue)],
-                ["", ""],
+                // Clients handed to them to set up - workload, not sales.
+                ["Onboarding", String(r.onboarding)],
               ].map(([label, value], i) =>
                 label ? (
                   <span key={label}>

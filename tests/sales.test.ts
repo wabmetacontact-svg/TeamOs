@@ -11,7 +11,12 @@ import { describe, expect, test } from "vitest";
 import { salesByMember, unownedClients, type SalesInput } from "../src/lib/sales";
 import type { ClientW, EntryW, TaskW } from "../src/lib/types";
 
-const client = (id: string, ownerId: string | null, retainer: number | null = 50_000): ClientW => ({
+const client = (
+  id: string,
+  ownerId: string | null,
+  retainer: number | null = 50_000,
+  onboarderId: string | null = null,
+): ClientW => ({
   id,
   brandId: "b1",
   name: id,
@@ -24,6 +29,7 @@ const client = (id: string, ownerId: string | null, retainer: number | null = 50
   payDay: null,
   rates: [],
   ownerId,
+  onboarderId,
 });
 
 const entry = (over: Partial<EntryW> & { clientId: string | null }): EntryW => ({
@@ -246,6 +252,48 @@ describe("their own work", () => {
       }),
     );
     expect(rows[0]!.tasksDone).toBe(1);
+  });
+});
+
+describe("a sale handed to an onboarder", () => {
+  // Ravi sells, Neha onboards. The money is Ravi's; the work is Neha's.
+  const clients = [client("c1", "ravi", 50_000, "neha"), client("c2", "ravi", 50_000, "neha")];
+  const financeClientIds = new Set(["c1", "c2"]);
+  const ledger = [entry({ clientId: "c1", amount: 2_000 }), entry({ clientId: "c2", amount: 3_000 })];
+
+  test("the seller keeps the credit and the revenue", () => {
+    const ravi = salesByMember(base({ clients, financeClientIds, ledger })).find((r) => r.memberId === "ravi")!;
+    expect(ravi.clients).toBe(2);
+    expect(ravi.received).toBe(5_000);
+    expect(ravi.onboarding).toBe(0);
+  });
+
+  test("the onboarder is listed for the work, with none of the revenue", () => {
+    // Credit is not workload. Counting a handed-over sale as the onboarder's
+    // revenue would double it across the team - once for each of them.
+    const neha = salesByMember(base({ clients, financeClientIds, ledger })).find((r) => r.memberId === "neha")!;
+    expect(neha).toBeDefined();
+    expect(neha.onboarding).toBe(2);
+    expect(neha.clients).toBe(0);
+    expect(neha.received).toBe(0);
+    expect(neha.bookPerMonth).toBe(0);
+  });
+
+  test("the team's revenue adds up to what was received, once", () => {
+    const rows = salesByMember(base({ clients, financeClientIds, ledger }));
+    expect(rows.reduce((a, r) => a + r.received, 0)).toBe(5_000);
+  });
+
+  test("somebody who brought a client in alone does both", () => {
+    const rows = salesByMember(
+      base({ clients: [client("c1", "neha", 50_000, "neha")], financeClientIds: new Set(["c1"]) }),
+    );
+    expect(rows[0]).toMatchObject({ memberId: "neha", clients: 1, onboarding: 1 });
+  });
+
+  test("the seller comes before the onboarder, money first", () => {
+    const rows = salesByMember(base({ clients, financeClientIds, ledger }));
+    expect(rows.map((r) => r.memberId)).toEqual(["ravi", "neha"]);
   });
 });
 
