@@ -9,6 +9,7 @@ import { Icon } from "../icons";
 import { fxLine, openModal } from "../modals";
 import { useOps } from "../store";
 import { CardGrid, Chip, MonthNav, StatCard } from "../ui";
+import { ProfitBreakdown } from "./profit";
 
 type TypeFilter = "all" | "in" | "out" | "pending";
 
@@ -73,6 +74,9 @@ export function ExpensesView() {
           note={pendIn + pendOut ? `${inrShort(pendIn)} to receive · ${inrShort(pendOut)} to pay` : "All clear"}
         />
       </CardGrid>
+      {/* Company profit, so only across every brand: a brand filter would make
+          "profit" mean something different from one view to the next. */}
+      {brand === "all" && m.overhead && <ProfitBreakdown ym={ym} entries={cur} />}
 
       <div className="my-3.5 flex flex-wrap gap-1.5">
         {(
