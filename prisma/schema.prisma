@@ -44,6 +44,10 @@ model Tenant {
   expenseCategories String[] @default([])
   /// Departments people belong to (HR). Task departments are their own table.
   hrDepartments     String[] @default([])
+  /// Income categories that earn no commission - e.g. wallet top-ups, which are
+  /// mostly money passed on to Meta rather than money the business keeps.
+  /// Empty means every rupee received counts.
+  commissionSkip    String[] @default([])
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -65,6 +69,8 @@ model Tenant {
   leaves          Leave[]
   holidays        Holiday[]
   audit           AuditEntry[]
+  commissionRates CommissionRate[]
+  commissionRules CommissionRule[]
 
   @@map("tenants")
 }
@@ -143,6 +149,8 @@ model Member {
   auditEntries    AuditEntry[]
   clientsOwned    Client[]          @relation("ClientOwner")
   clientsOnboarding Client[]        @relation("ClientOnboarder")
+  commissionRates CommissionRate[]
+  commissionRules CommissionRule[]
 
   @@unique([tenantId, email])
   @@unique([tenantId, externalId])
@@ -201,6 +209,59 @@ model SalaryChange {
   @@index([tenantId])
   @@index([memberId])
   @@map("salary_changes")
+}
+
+/// What share of the money a member's own clients pay is theirs, and from
+/// when. Kept as history like salary: a new rate applies from its date, and
+/// money received before it is still worked out at the rate then in force.
+model CommissionRate {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  memberId      String
+  member        Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  effectiveFrom DateTime @db.Date
+  /// Basis points: 1000 is 10%. An integer, so a rate cannot drift.
+  bps           Int
+  createdAt     DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([memberId])
+  @@map("commission_rates")
+}
+
+/// A commission given by hand - to anybody, for anything: a fixed amount per
+/// onboarding, a bonus, a share of one client's money for somebody who did not
+/// bring it in. On top of the automatic commission, never instead of it.
+model CommissionRule {
+  id          String    @id @default(cuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  memberId    String
+  member      Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  /// The client it is about, if any. Required for a percentage: a share of
+  /// what this client paid that month.
+  clientId    String?
+  client      Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  /// fixed | percent
+  kind        String
+  /// fixed: paise.
+  amount      BigInt    @default(0)
+  /// percent: basis points of what the client paid in the month.
+  bps         Int       @default(0)
+  /// once | monthly
+  repeat      String    @default("once")
+  /// The first month it counts in (the 1st of that month).
+  fromMonth   DateTime  @db.Date
+  /// The last month a monthly rule counts in. Null runs until it is stopped.
+  toMonth     DateTime? @db.Date
+  note        String    @default("")
+  createdById String
+  createdAt   DateTime  @default(now())
+
+  @@index([tenantId])
+  @@index([memberId])
+  @@map("commission_rules")
 }
 
 /// A company the workspace runs. An agency brand works for clients; a startup
@@ -281,6 +342,7 @@ model Client {
 
   rates  ClientRate[]
   grants ClientGrant[]
+  commissionRules CommissionRule[]
   ledger LedgerEntry[]
   tasks  Task[]
   series TaskSeries[]

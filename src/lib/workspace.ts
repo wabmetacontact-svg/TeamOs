@@ -3,6 +3,8 @@ import type {
   AuditEntry,
   Brand,
   Client,
+  CommissionRate,
+  CommissionRule,
   ClientGrant,
   ClientRate,
   Holiday,
@@ -37,6 +39,8 @@ import type {
   AuditW,
   BrandW,
   ClientW,
+  CommissionRateW,
+  CommissionRuleW,
   DeptW,
   EntryW,
   GrantW,
@@ -98,8 +102,30 @@ export function mapTenant(t: Tenant): TenantW {
     incomeCategories: t.incomeCategories,
     expenseCategories: t.expenseCategories,
     hrDepartments: t.hrDepartments,
+    commissionSkip: t.commissionSkip,
   };
 }
+
+export const mapCommissionRate = (r: CommissionRate): CommissionRateW => ({
+  id: r.id,
+  memberId: r.memberId,
+  from: dateOnly(r.effectiveFrom)!,
+  bps: r.bps,
+});
+
+export const mapCommissionRule = (r: CommissionRule): CommissionRuleW => ({
+  id: r.id,
+  memberId: r.memberId,
+  clientId: r.clientId,
+  kind: r.kind === "percent" ? "percent" : "fixed",
+  amount: rupees(r.amount),
+  bps: r.bps,
+  repeat: r.repeat === "monthly" ? "monthly" : "once",
+  fromMonth: dateOnly(r.fromMonth)!.slice(0, 7),
+  toMonth: r.toMonth ? dateOnly(r.toMonth)!.slice(0, 7) : null,
+  note: r.note,
+  byId: r.createdById,
+});
 
 export function mapMember(m: Member, ctx: MapCtx, salaries: SalaryChange[] = []): MemberW {
   return {
@@ -419,7 +445,7 @@ export async function loadWorkspace(signed: Signed): Promise<Workspace> {
   const viewer = asPerson(viewerRow);
   const r = reachOf(viewer, grantMap(grantRows));
 
-  const [members, salaries, brands, clients, rates, ledger, depts, tasks, series, cols, leaves, holidays, audit] =
+  const [members, salaries, brands, clients, rates, ledger, depts, tasks, series, cols, leaves, holidays, audit, commissionRates, commissionRules] =
     await Promise.all([
       db.member.findMany({ orderBy: [{ isOwner: "desc" }, { createdAt: "asc" }] }),
       r.payroll ? db.salaryChange.findMany() : Promise.resolve([]),
@@ -434,6 +460,9 @@ export async function loadWorkspace(signed: Signed): Promise<Workspace> {
       db.leave.findMany({ orderBy: { fromDate: "desc" } }),
       db.holiday.findMany({ orderBy: { date: "asc" } }),
       db.auditEntry.findMany({ orderBy: { at: "desc" }, take: AUDIT_LIMIT * 2 }),
+      // What somebody is paid is Payroll's business, like their salary.
+      r.payroll ? db.commissionRate.findMany({ orderBy: { effectiveFrom: "asc" } }) : Promise.resolve([]),
+      r.payroll ? db.commissionRule.findMany({ orderBy: { createdAt: "asc" } }) : Promise.resolve([]),
     ]);
 
   const ctx: MapCtx = { tz, payroll: r.payroll, finance: r.financeClient };
@@ -459,5 +488,7 @@ export async function loadWorkspace(signed: Signed): Promise<Workspace> {
       .filter((a) => auditVisible(r, a))
       .slice(0, AUDIT_LIMIT)
       .map((a) => mapAudit(a, tz)),
+    commissionRates: commissionRates.map(mapCommissionRate),
+    commissionRules: commissionRules.map(mapCommissionRule),
   };
 }

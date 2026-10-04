@@ -20,6 +20,8 @@ export type TenantW = {
   incomeCategories: string[];
   expenseCategories: string[];
   hrDepartments: string[];
+  /** Income categories that earn no commission. */
+  commissionSkip: string[];
 };
 
 export type PayW = {
@@ -192,6 +194,27 @@ export type AuditW = {
   to: string;
 };
 
+/** A member's commission rate from a date. Payroll only. */
+export type CommissionRateW = { id: string; memberId: string; /** yyyy-MM-dd */ from: string; bps: number };
+
+/** A commission given by hand. Payroll only. */
+export type CommissionRuleW = {
+  id: string;
+  memberId: string;
+  clientId: string | null;
+  kind: "fixed" | "percent";
+  /** Rupees, for a fixed amount. */
+  amount: number;
+  /** Basis points, for a percentage. */
+  bps: number;
+  repeat: "once" | "monthly";
+  /** yyyy-MM */
+  fromMonth: string;
+  toMonth: string | null;
+  note: string;
+  byId: string;
+};
+
 export type Workspace = {
   tenant: TenantW;
   /** The signed-in person. */
@@ -210,12 +233,28 @@ export type Workspace = {
   leaves: LeaveW[];
   holidays: HolidayW[];
   audit: AuditW[];
+  /** Empty unless the viewer has Payroll. */
+  commissionRates: CommissionRateW[];
+  commissionRules: CommissionRuleW[];
 };
 
 /** The collections a change can touch, by name. */
 export type Collections = Pick<
   Workspace,
-  "members" | "brands" | "clients" | "grants" | "ledger" | "depts" | "tasks" | "series" | "sheetCols" | "leaves" | "holidays" | "audit"
+  | "members"
+  | "brands"
+  | "clients"
+  | "grants"
+  | "ledger"
+  | "depts"
+  | "tasks"
+  | "series"
+  | "sheetCols"
+  | "leaves"
+  | "holidays"
+  | "audit"
+  | "commissionRates"
+  | "commissionRules"
 >;
 
 /** What an action sends back: the records it changed, applied in place. */

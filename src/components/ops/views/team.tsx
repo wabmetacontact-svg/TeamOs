@@ -5,6 +5,7 @@ import { dLabel, dLong, dayDiff, initials, inr, inrShort, ymAdd, ymLabel } from 
 import { decideLeave, removeHrDept } from "@/app/(app)/actions/team";
 import { paySalary, payAllSalaries } from "@/app/(app)/actions/ledger";
 import { salesByMember, unownedClients } from "@/lib/sales";
+import { Commissions } from "./commissions";
 import { openModal } from "../modals";
 import { useOps, useWide } from "../store";
 import { CardGrid, Chip, DashedAdd, LockNotice, MonthNav, StatCard, Tabs, TextLink } from "../ui";
@@ -559,6 +560,8 @@ function Payroll() {
       <p className="mx-0.5 mb-0 mt-2.5 text-xs text-mute">
         Marking a salary as paid adds it to Income and expenses under Salaries. Salary changes are kept in each person&apos;s salary history and the audit trail.
       </p>
+
+      <Commissions ym={ym} canEdit={canEdit} />
 
       <div className="mb-2.5 mt-7 flex flex-wrap items-center gap-2">
         <h3 className="m-0 flex-1 text-[15px]">Partner draws</h3>
