@@ -166,6 +166,8 @@ export function ClientAccount({ c }: { c: ClientW }) {
         )}
       </Section>
 
+      {c.setup && <SetupSection c={c} />}
+
       <Section className="[grid-column:1/-1]">
         <h2 className="m-0 mb-3 text-[15px]">Details</h2>
         <textarea
@@ -184,5 +186,81 @@ export function ClientAccount({ c }: { c: ClientW }) {
         )}
       </Section>
     </div>
+  );
+}
+
+/**
+ * The onboarder's setup sheet, as WabMeta keeps it. Read-only here: it is
+ * edited on the client's page in the WabMeta admin, and the next sync brings
+ * the change. Passwords stay in WabMeta - a line only says it has one.
+ * Charges are money, so they need Finance on the client, like the retainer.
+ */
+function SetupSection({ c }: { c: ClientW }) {
+  const { m } = useOps();
+  const s = c.setup!;
+  const fin = m.finIds.has(c.id);
+  const total = s.items.reduce((a, i) => a + (i.chargePaise ?? 0), 0);
+  const money = (p: number | null) => (p === null ? "NIL" : `₹${(p / 100).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`);
+
+  return (
+    <Section className="[grid-column:1/-1]">
+      <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h2 className="m-0 text-[15px]">Setup</h2>
+        {s.businessType && <span className="text-[13px] text-mute2">{s.businessType}</span>}
+        <span className="flex-1" />
+        <span
+          className="fw-s rounded-full px-2.5 py-[3px] text-[11px]"
+          style={{ background: s.doneOn ? "#DCFCE7" : "#FEF3C7", color: s.doneOn ? "#15803D" : "#B45309" }}
+        >
+          {s.doneOn ? `Done ${s.doneOn}` : "In progress"}
+        </span>
+      </div>
+      {s.items.length ? (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] border-collapse text-[13px]">
+            <thead>
+              <tr className="border-b border-line text-left text-[11px] uppercase tracking-[.06em] text-mute">
+                <th className="py-2 pr-3 font-normal">Setup</th>
+                {fin && <th className="py-2 pr-3 font-normal">Charges</th>}
+                <th className="py-2 pr-3 font-normal">IDs</th>
+                <th className="py-2 font-normal">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {s.items.map((i, n) => (
+                <tr key={`${i.label}-${n}`} className="border-b border-line3 align-top">
+                  <td className="fw-s py-2 pr-3">{i.label}</td>
+                  {fin && (
+                    <td className="tnum py-2 pr-3">
+                      {money(i.chargePaise)}
+                      {i.chargeNote && <span className="block text-xs text-mute">{i.chargeNote}</span>}
+                    </td>
+                  )}
+                  <td className="py-2 pr-3">
+                    <span className="whitespace-pre-wrap break-words">{i.details || <span className="text-faint">—</span>}</span>
+                    {i.hasPassword && <span className="mt-0.5 block text-xs text-mute">Password saved in WabMeta</span>}
+                  </td>
+                  <td className="py-2">{i.status || <span className="text-faint">—</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+            {fin && (
+              <tfoot>
+                <tr>
+                  <td className="fw-s pt-2.5">Total</td>
+                  <td className="fw-s tnum pt-2.5">{money(total)}</td>
+                  <td colSpan={2} />
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      ) : (
+        <p className="m-0 text-[13px] text-mute">No setup lines yet.</p>
+      )}
+      <p className="m-0 mt-2.5 text-xs text-mute">
+        From the onboarder&apos;s setup sheet in WabMeta. Change it there; the next sync brings it here.
+      </p>
+    </Section>
   );
 }

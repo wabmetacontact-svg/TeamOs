@@ -1,6 +1,6 @@
 import "server-only";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { tenantTransaction } from "./db";
 
@@ -146,6 +146,29 @@ export const clientEvent = z.object({
   loginId: z.string().max(200).nullish(),
   phone: z.string().max(40).nullish(),
   plan: z.string().max(120).nullish(),
+  /**
+   * The onboarder's setup sheet. Each line says only whether it has a password;
+   * a password field, if one were ever sent, is not in this schema and so is
+   * dropped by zod before anything is written.
+   */
+  setup: z
+    .object({
+      businessType: z.string().max(80).nullish(),
+      doneOn: dayString.nullish(),
+      items: z
+        .array(
+          z.object({
+            label: z.string().max(80),
+            chargePaise: z.number().int().nonnegative().nullable(),
+            chargeNote: z.string().max(120),
+            details: z.string().max(2000),
+            status: z.string().max(40),
+            hasPassword: z.boolean(),
+          }),
+        )
+        .max(40),
+    })
+    .nullish(),
   /** True once the organization is closed or deleted over there. */
   removed: z.boolean().nullish(),
 });
@@ -201,6 +224,37 @@ export type EventResult = {
 type Tx = Omit<PrismaClient, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">;
 
 const day = (s: string) => new Date(`${s}T00:00:00.000Z`);
+
+/**
+ * The setup sheet with exactly the fields TeamOS keeps, built field by field.
+ *
+ * The route's zod parse already drops anything else, but this must not depend
+ * on every caller having parsed first: a password is the one field that must
+ * never be stored here, so it is excluded by construction, not by filtering.
+ */
+const setupOf = (s: NonNullable<ClientEvent["setup"]>) => ({
+  businessType: s.businessType ?? null,
+  doneOn: s.doneOn ?? null,
+  items: s.items.map((i) => ({
+    label: i.label,
+    chargePaise: i.chargePaise,
+    chargeNote: i.chargeNote,
+    details: i.details,
+    status: i.status,
+    hasPassword: i.hasPassword,
+  })),
+});
+
+/** JSON with object keys sorted, for comparing values that went through jsonb. */
+const stable = (v: unknown): string => {
+  if (v === null || v === undefined || typeof v !== "object") return JSON.stringify(v ?? null);
+  if (Array.isArray(v)) return `[${v.map(stable).join(",")}]`;
+  return `{${Object.keys(v as object)
+    .sort()
+    .filter((k) => (v as Record<string, unknown>)[k] !== undefined)
+    .map((k) => `${JSON.stringify(k)}:${stable((v as Record<string, unknown>)[k])}`)
+    .join(",")}}`;
+};
 const trim = (v: string | null | undefined) => (v == null ? null : v.trim() || null);
 
 /** A failure WabMeta should send again later. */
@@ -355,6 +409,7 @@ async function applyClient(tx: Tx, tenantId: string, e: ClientEvent): Promise<Ev
     ...(e.loginId !== undefined && { loginId: trim(e.loginId) ?? "" }),
     ...(e.phone !== undefined && { phone: trim(e.phone) ?? "" }),
     ...(e.plan !== undefined && { plan: trim(e.plan) ?? "" }),
+    ...(e.setup !== undefined && { setup: e.setup === null ? Prisma.JsonNull : (setupOf(e.setup) as Prisma.InputJsonValue) }),
   };
 
   if (existing) {
@@ -368,6 +423,9 @@ async function applyClient(tx: Tx, tenantId: string, e: ClientEvent): Promise<Ev
       (account.loginId === undefined || existing.loginId === account.loginId) &&
       (account.phone === undefined || existing.phone === account.phone) &&
       (account.plan === undefined || existing.plan === account.plan) &&
+      // Postgres reorders the keys of stored JSON, so compare with the keys
+      // sorted - otherwise an unchanged sheet would look changed every time.
+      (e.setup === undefined || stable(existing.setup) === stable(e.setup ? setupOf(e.setup) : null)) &&
       (existing.removedAt === null) === (removedAt === null);
     if (same) return { id: e.id, status: "unchanged" };
 

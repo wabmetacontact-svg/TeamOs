@@ -37,6 +37,7 @@ const client = (
   plan: "",
   details: "",
   hasPassword: false,
+  setup: null,
 });
 
 const entry = (over: Partial<EntryW> & { clientId: string | null }): EntryW => ({
