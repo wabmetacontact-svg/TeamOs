@@ -137,6 +137,14 @@ export const clientEvent = z.object({
    * wire, so a sender that predates the field keeps working.
    */
   onboarderExternalId: z.string().nullish(),
+  /**
+   * The client's account, as WabMeta knows it. Each is optional on the wire:
+   * absent means "this sender does not send it", and leaves the stored value
+   * alone rather than blanking it.
+   */
+  loginId: z.string().max(200).nullish(),
+  phone: z.string().max(40).nullish(),
+  plan: z.string().max(120).nullish(),
   /** True once the organization is closed or deleted over there. */
   removed: z.boolean().nullish(),
 });
@@ -340,6 +348,14 @@ async function applyClient(tx: Tx, tenantId: string, e: ClientEvent): Promise<Ev
   const existing = await tx.client.findFirst({ where: { externalId: e.externalId } });
   const removedAt = e.removed ? (existing?.removedAt ?? new Date()) : null;
 
+  // Only what the sender sent. `undefined` keeps the stored value, so an older
+  // sender cannot wipe a login it never knew about.
+  const account = {
+    ...(e.loginId !== undefined && { loginId: trim(e.loginId) ?? "" }),
+    ...(e.phone !== undefined && { phone: trim(e.phone) ?? "" }),
+    ...(e.plan !== undefined && { plan: trim(e.plan) ?? "" }),
+  };
+
   if (existing) {
     const same =
       existing.name === name &&
@@ -348,12 +364,15 @@ async function applyClient(tx: Tx, tenantId: string, e: ClientEvent): Promise<Ev
       existing.retainer === retainer &&
       existing.ownerMemberId === ownerMemberId &&
       existing.onboarderMemberId === onboarderMemberId &&
+      (account.loginId === undefined || existing.loginId === account.loginId) &&
+      (account.phone === undefined || existing.phone === account.phone) &&
+      (account.plan === undefined || existing.plan === account.plan) &&
       (existing.removedAt === null) === (removedAt === null);
     if (same) return { id: e.id, status: "unchanged" };
 
     await tx.client.update({
       where: { id: existing.id },
-      data: { name, company, contact, retainer, sinceDate: since, ownerMemberId, onboarderMemberId, removedAt },
+      data: { name, company, contact, retainer, sinceDate: since, ownerMemberId, onboarderMemberId, removedAt, ...account },
     });
     await log(tx, tenantId, {
       kind: "client",
@@ -377,6 +396,7 @@ async function applyClient(tx: Tx, tenantId: string, e: ClientEvent): Promise<Ev
       ownerMemberId,
       onboarderMemberId,
       removedAt,
+      ...account,
       externalSource: SOURCE,
       externalId: e.externalId,
     },

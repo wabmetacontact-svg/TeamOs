@@ -1,8 +1,11 @@
 import "server-only";
 import type {
+  AdSpend,
   AuditEntry,
   Brand,
   Client,
+  CommissionRate,
+  CommissionRule,
   ClientGrant,
   ClientRate,
   Holiday,
@@ -34,9 +37,12 @@ import {
 import { nowIn, todayIn } from "./format";
 import { occurrencesThrough, type Rule } from "./recurrence";
 import type {
+  AdSpendW,
   AuditW,
   BrandW,
   ClientW,
+  CommissionRateW,
+  CommissionRuleW,
   DeptW,
   EntryW,
   GrantW,
@@ -98,8 +104,41 @@ export function mapTenant(t: Tenant): TenantW {
     incomeCategories: t.incomeCategories,
     expenseCategories: t.expenseCategories,
     hrDepartments: t.hrDepartments,
+    commissionSkip: t.commissionSkip,
   };
 }
+
+export const mapCommissionRate = (r: CommissionRate): CommissionRateW => ({
+  id: r.id,
+  memberId: r.memberId,
+  from: dateOnly(r.effectiveFrom)!,
+  bps: r.bps,
+});
+
+export const mapAdSpend = (a: AdSpend): AdSpendW => ({
+  id: a.id,
+  memberId: a.memberId,
+  month: dateOnly(a.month)!.slice(0, 7),
+  amount: rupees(a.amount),
+  leads: a.leads,
+  note: a.note,
+  ledgerEntryId: a.ledgerEntryId,
+  byId: a.createdById,
+});
+
+export const mapCommissionRule = (r: CommissionRule): CommissionRuleW => ({
+  id: r.id,
+  memberId: r.memberId,
+  clientId: r.clientId,
+  kind: r.kind === "percent" ? "percent" : "fixed",
+  amount: rupees(r.amount),
+  bps: r.bps,
+  repeat: r.repeat === "monthly" ? "monthly" : "once",
+  fromMonth: dateOnly(r.fromMonth)!.slice(0, 7),
+  toMonth: r.toMonth ? dateOnly(r.toMonth)!.slice(0, 7) : null,
+  note: r.note,
+  byId: r.createdById,
+});
 
 export function mapMember(m: Member, ctx: MapCtx, salaries: SalaryChange[] = []): MemberW {
   return {
@@ -164,6 +203,15 @@ export function mapClient(c: Client, ctx: MapCtx, rates: ClientRate[] = []): Cli
     payDay: c.payDay,
     ownerId: c.ownerMemberId,
     onboarderId: c.onboarderMemberId,
+    synced: c.externalSource !== null,
+    wabmetaId: c.externalSource === "wabmeta" && c.externalId?.startsWith("org:") ? c.externalId.slice(4) : null,
+    loginId: c.loginId,
+    phone: c.phone,
+    plan: c.plan,
+    details: c.details,
+    // Only that it exists. passwordEnc is deliberately not mapped: this object
+    // is sent to the browser on every page load.
+    hasPassword: c.passwordEnc !== null,
     rates: fin
       ? rates
           .filter((r) => r.clientId === c.id)
@@ -410,7 +458,7 @@ export async function loadWorkspace(signed: Signed): Promise<Workspace> {
   const viewer = asPerson(viewerRow);
   const r = reachOf(viewer, grantMap(grantRows));
 
-  const [members, salaries, brands, clients, rates, ledger, depts, tasks, series, cols, leaves, holidays, audit] =
+  const [members, salaries, brands, clients, rates, ledger, depts, tasks, series, cols, leaves, holidays, audit, commissionRates, commissionRules, adSpends] =
     await Promise.all([
       db.member.findMany({ orderBy: [{ isOwner: "desc" }, { createdAt: "asc" }] }),
       r.payroll ? db.salaryChange.findMany() : Promise.resolve([]),
@@ -425,6 +473,11 @@ export async function loadWorkspace(signed: Signed): Promise<Workspace> {
       db.leave.findMany({ orderBy: { fromDate: "desc" } }),
       db.holiday.findMany({ orderBy: { date: "asc" } }),
       db.auditEntry.findMany({ orderBy: { at: "desc" }, take: AUDIT_LIMIT * 2 }),
+      // What somebody is paid is Payroll's business, like their salary.
+      r.payroll ? db.commissionRate.findMany({ orderBy: { effectiveFrom: "asc" } }) : Promise.resolve([]),
+      r.payroll ? db.commissionRule.findMany({ orderBy: { createdAt: "asc" } }) : Promise.resolve([]),
+      // Ad spend is overhead money - no client - so it follows the overhead rule.
+      canOverhead(viewer) ? db.adSpend.findMany({ orderBy: { createdAt: "asc" } }) : Promise.resolve([]),
     ]);
 
   const ctx: MapCtx = { tz, payroll: r.payroll, finance: r.financeClient };
@@ -450,5 +503,8 @@ export async function loadWorkspace(signed: Signed): Promise<Workspace> {
       .filter((a) => auditVisible(r, a))
       .slice(0, AUDIT_LIMIT)
       .map((a) => mapAudit(a, tz)),
+    commissionRates: commissionRates.map(mapCommissionRate),
+    commissionRules: commissionRules.map(mapCommissionRule),
+    adSpends: adSpends.map(mapAdSpend),
   };
 }

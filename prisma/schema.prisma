@@ -44,6 +44,10 @@ model Tenant {
   expenseCategories String[] @default([])
   /// Departments people belong to (HR). Task departments are their own table.
   hrDepartments     String[] @default([])
+  /// Income categories that earn no commission - e.g. wallet top-ups, which are
+  /// mostly money passed on to Meta rather than money the business keeps.
+  /// Empty means every rupee received counts.
+  commissionSkip    String[] @default([])
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -65,6 +69,9 @@ model Tenant {
   leaves          Leave[]
   holidays        Holiday[]
   audit           AuditEntry[]
+  commissionRates CommissionRate[]
+  commissionRules CommissionRule[]
+  adSpends        AdSpend[]
 
   @@map("tenants")
 }
@@ -143,6 +150,9 @@ model Member {
   auditEntries    AuditEntry[]
   clientsOwned    Client[]          @relation("ClientOwner")
   clientsOnboarding Client[]        @relation("ClientOnboarder")
+  commissionRates CommissionRate[]
+  commissionRules CommissionRule[]
+  adSpends        AdSpend[]
 
   @@unique([tenantId, email])
   @@unique([tenantId, externalId])
@@ -201,6 +211,87 @@ model SalaryChange {
   @@index([tenantId])
   @@index([memberId])
   @@map("salary_changes")
+}
+
+/// What share of the money a member's own clients pay is theirs, and from
+/// when. Kept as history like salary: a new rate applies from its date, and
+/// money received before it is still worked out at the rate then in force.
+model CommissionRate {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  memberId      String
+  member        Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  effectiveFrom DateTime @db.Date
+  /// Basis points: 1000 is 10%. An integer, so a rate cannot drift.
+  bps           Int
+  createdAt     DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([memberId])
+  @@map("commission_rates")
+}
+
+/// A commission given by hand - to anybody, for anything: a fixed amount per
+/// onboarding, a bonus, a share of one client's money for somebody who did not
+/// bring it in. On top of the automatic commission, never instead of it.
+model CommissionRule {
+  id          String    @id @default(cuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  memberId    String
+  member      Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  /// The client it is about, if any. Required for a percentage: a share of
+  /// what this client paid that month.
+  clientId    String?
+  client      Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  /// fixed | percent
+  kind        String
+  /// fixed: paise.
+  amount      BigInt    @default(0)
+  /// percent: basis points of what the client paid in the month.
+  bps         Int       @default(0)
+  /// once | monthly
+  repeat      String    @default("once")
+  /// The first month it counts in (the 1st of that month).
+  fromMonth   DateTime  @db.Date
+  /// The last month a monthly rule counts in. Null runs until it is stopped.
+  toMonth     DateTime? @db.Date
+  note        String    @default("")
+  createdById String
+  createdAt   DateTime  @default(now())
+
+  @@index([tenantId])
+  @@index([memberId])
+  @@map("commission_rules")
+}
+
+/// Ads run for one person in one month, and the leads they brought.
+///
+/// The money is also an expense in ledger_entries (category "Ads"), written in
+/// the same transaction and removed with it - the ledger stays the one place
+/// money lives, so the month's profit already counts ad spend. This row adds
+/// what the ledger cannot hold: whose leads they were, and how many.
+model AdSpend {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  memberId      String
+  member        Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  /// The 1st of the month the ads ran in.
+  month         DateTime @db.Date
+  /// Paise. Zero is allowed: leads that cost nothing still count as leads.
+  amount        BigInt   @default(0)
+  leads         Int      @default(0)
+  note          String   @default("")
+  /// The expense this spend wrote, if it cost anything.
+  ledgerEntryId String?
+  createdById   String
+  createdAt     DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([memberId])
+  @@map("ad_spends")
 }
 
 /// A company the workspace runs. An agency brand works for clients; a startup
@@ -264,8 +355,24 @@ model Client {
   onboarderMemberId String?
   onboarder         Member? @relation("ClientOnboarder", fields: [onboarderMemberId], references: [id], onDelete: SetNull)
 
+  // ── the client's account
+  /// The login the client signs in with - their email in WabMeta. Mirrored
+  /// from WabMeta for synced clients; typed in here for the rest.
+  loginId       String    @default("")
+  phone         String    @default("")
+  /// The plan they are on in WabMeta. Mirrored only.
+  plan          String    @default("")
+  /// Free notes about the client. Owned by TeamOS: the sync never writes it.
+  details       String    @default("")
+  /// The client's password, if an owner chose to keep it here - encrypted with
+  /// CLIENT_VAULT_KEY (src/lib/vault.ts), never sent to the browser with the
+  /// workspace, and decrypted only on an owner's request, which is audited.
+  passwordEnc   String?
+  passwordSetAt DateTime?
+
   rates  ClientRate[]
   grants ClientGrant[]
+  commissionRules CommissionRule[]
   ledger LedgerEntry[]
   tasks  Task[]
   series TaskSeries[]

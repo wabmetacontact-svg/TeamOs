@@ -177,8 +177,8 @@ async function main() {
   await page(`/clients/${seeded.client.id}`, ownerCookie, "client page", ["Acme Foods", "Received since onboarding", "Who worked on them"]);
   const monthLabel = new Date(`${ym}-01T00:00:00Z`).toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
   await page("/tasks", ownerCookie, "tasks", ["October content calendar", "Fix tracking pixel", "Recurring", monthLabel, "All time", "Calendar"]);
-  await page("/team", ownerCookie, "team", ["Rahul Writer", "Headcount", "Leave requests", "Sales"]);
-  await page("/expenses", ownerCookie, "income and expenses", ["Acme retainer", "Office rent", "Pending"]);
+  await page("/team", ownerCookie, "team", ["Rahul Writer", "Headcount", "Leave requests", "Sales", "Ads"]);
+  await page("/expenses", ownerCookie, "income and expenses", ["Acme retainer", "Office rent", "Pending", "The Net above, opened up"]);
   await page("/access", ownerCookie, "access", ["Rahul Writer", "Apply preset", "Dashboard figures"]);
   await page("/audit", ownerCookie, "audit trail", ["added client"]);
   await page("/import", ownerCookie, "import", ["What are you importing?", "Income and expenses"]);

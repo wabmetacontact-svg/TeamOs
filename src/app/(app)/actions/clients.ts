@@ -4,6 +4,7 @@ import { z } from "zod";
 import { CLIENT_LEVEL_LABEL, canEdit, clientLevel, grantKey, type ClientLevel } from "@/lib/access";
 import { addDays, readAmount } from "@/lib/format";
 import { mutate } from "@/lib/mutate";
+import { open, seal, vaultReady } from "@/lib/vault";
 import type { Result } from "@/lib/types";
 import { mapBrand, mapGrant, reachOf, toDate, toPaise } from "@/lib/workspace";
 import { ID, OPT_DATE, brandOf, clientOf, memberOf, needClient, outClient, parse, rs } from "@/lib/action-helpers";
@@ -100,16 +101,23 @@ export async function editClient(raw: z.input<typeof profile> & { id: string }):
     const old = await clientOf(ctx, f.id);
     needClient(ctx, old.id, "edit", old.name);
     const brand = await brandOf(ctx, f.brand);
-    if (f.name.toLowerCase() !== old.name.toLowerCase()) {
+    if (old.externalSource === null && f.name.toLowerCase() !== old.name.toLowerCase()) {
       const clash = await ctx.tx.client.findFirst({
         where: { removedAt: null, id: { not: old.id }, name: { equals: f.name, mode: "insensitive" } },
       });
       if (clash) ctx.fail("A client with this name already exists.", { name: "A client with this name already exists." });
     }
 
+    // A client mirrored from WabMeta has its name, company, contact, monthly
+    // figure and start date overwritten by the next sync. Accepting an edit to
+    // them here would look like it worked and quietly undo itself later, so
+    // they keep their stored values and are changed in WabMeta instead. The
+    // fields TeamOS owns - brand, pay day, services - still save.
+    const synced = old.externalSource !== null;
+
     // The retainer is money: changing it needs Finance, and is kept as history.
     const fin = ctx.reach.financeClient(old.id);
-    const retainer = fin ? readRetainer(f.retainer, ctx.fail) : Number(old.retainer) / 100;
+    const retainer = fin && !synced ? readRetainer(f.retainer, ctx.fail) : Number(old.retainer) / 100;
     const changed = toPaise(retainer) !== old.retainer;
     if (changed) {
       const last = await ctx.tx.clientRate.findFirst({ where: { clientId: old.id, toDate: null }, orderBy: { fromDate: "desc" } });
@@ -128,13 +136,13 @@ export async function editClient(raw: z.input<typeof profile> & { id: string }):
     await ctx.tx.client.update({
       where: { id: old.id },
       data: {
-        name: f.name,
-        company: f.company,
+        name: synced ? old.name : f.name,
+        company: synced ? old.company : f.company,
         brandId: brand.id,
         retainer: toPaise(retainer),
         services: f.services,
-        contact: f.contact,
-        sinceDate: f.sinceDate ? toDate(f.sinceDate) : old.sinceDate,
+        contact: synced ? old.contact : f.contact,
+        sinceDate: synced ? old.sinceDate : f.sinceDate ? toDate(f.sinceDate) : old.sinceDate,
         payDay: payDayOf(f.payDay),
       },
     });
@@ -148,6 +156,98 @@ export async function editClient(raw: z.input<typeof profile> & { id: string }):
       to: changed ? rs(retainer) : "Profile updated",
     });
     return "Client profile saved.";
+  });
+}
+
+// ─── the client's account ──────────────────────────────────────────────────
+
+const account = z.object({
+  id: ID,
+  details: z.string().max(5000).default(""),
+  loginId: z.string().trim().max(200).optional(),
+  phone: z.string().trim().max(40).optional(),
+});
+
+/**
+ * Notes about the client, and - for a client added here - its login and phone.
+ *
+ * For a synced client the login and phone come from WabMeta and the next sync
+ * would overwrite them, so only the notes are taken. Needs Edit on the client.
+ */
+export async function saveClientAccount(raw: z.input<typeof account>): Promise<Result> {
+  return mutate(async (ctx) => {
+    ctx.need("clients");
+    const f = parse(ctx, account, raw);
+    const c = await clientOf(ctx, f.id);
+    needClient(ctx, c.id, "edit", c.name);
+    const synced = c.externalSource !== null;
+
+    await ctx.tx.client.update({
+      where: { id: c.id },
+      data: {
+        details: f.details,
+        ...(!synced && f.loginId !== undefined && { loginId: f.loginId }),
+        ...(!synced && f.phone !== undefined && { phone: f.phone }),
+      },
+    });
+    await outClient(ctx, c.id);
+    await ctx.log({ kind: "client", text: `updated the account details of ${c.name}`, target: c.name, clientId: c.id });
+    return "Account details saved.";
+  });
+}
+
+const PASSWORD = z.object({ id: ID, password: z.string().min(1, "Enter the password.").max(200) });
+
+/**
+ * Only an owner may store, read or remove a client's password, and every one
+ * of those is written to the audit trail - without the password. Reading it
+ * goes through mutate too, so it is refused while an owner is previewing
+ * somebody else's access and is logged in the same transaction it happens in.
+ */
+function ownerOnly(ctx: Parameters<Parameters<typeof mutate>[0]>[0]) {
+  if (!ctx.person.isOwner) ctx.fail("Only an owner can see or change a client's password.");
+  if (!vaultReady()) ctx.fail("Passwords cannot be stored yet: CLIENT_VAULT_KEY is not set on the server.");
+}
+
+export async function setClientPassword(raw: z.input<typeof PASSWORD>): Promise<Result> {
+  return mutate(async (ctx) => {
+    ownerOnly(ctx);
+    const f = parse(ctx, PASSWORD, raw);
+    const c = await clientOf(ctx, f.id);
+    await ctx.tx.client.update({
+      where: { id: c.id },
+      data: { passwordEnc: seal(f.password), passwordSetAt: new Date() },
+    });
+    await outClient(ctx, c.id);
+    await ctx.log({
+      kind: "client",
+      text: c.passwordEnc ? `changed the stored login password of ${c.name}` : `stored a login password for ${c.name}`,
+      target: c.name,
+      clientId: c.id,
+    });
+    return "Password stored, encrypted.";
+  });
+}
+
+export async function revealClientPassword(id: string): Promise<Result<{ password: string }>> {
+  return mutate(async (ctx) => {
+    ownerOnly(ctx);
+    const c = await clientOf(ctx, id);
+    if (!c.passwordEnc) ctx.fail("No password is stored for this client.");
+    const password = open(c.passwordEnc!);
+    await ctx.log({ kind: "client", text: `viewed the login password of ${c.name}`, target: c.name, clientId: c.id });
+    return { data: { password } };
+  });
+}
+
+export async function clearClientPassword(id: string): Promise<Result> {
+  return mutate(async (ctx) => {
+    ownerOnly(ctx);
+    const c = await clientOf(ctx, id);
+    await ctx.tx.client.update({ where: { id: c.id }, data: { passwordEnc: null, passwordSetAt: null } });
+    await outClient(ctx, c.id);
+    await ctx.log({ kind: "client", text: `removed the stored login password of ${c.name}`, target: c.name, clientId: c.id });
+    return "Password removed.";
   });
 }
 
