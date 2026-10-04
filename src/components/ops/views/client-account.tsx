@@ -166,7 +166,7 @@ export function ClientAccount({ c }: { c: ClientW }) {
         )}
       </Section>
 
-      {c.setup && <SetupSection c={c} />}
+      {(c.setup || c.synced) && <SetupSection c={c} />}
 
       <Section className="[grid-column:1/-1]">
         <h2 className="m-0 mb-3 text-[15px]">Details</h2>
@@ -194,10 +194,23 @@ export function ClientAccount({ c }: { c: ClientW }) {
  * edited on the client's page in the WabMeta admin, and the next sync brings
  * the change. Passwords stay in WabMeta - a line only says it has one.
  * Charges are money, so they need Finance on the client, like the retainer.
+ *
+ * Shown on every WabMeta client, even before a sheet has arrived: a section
+ * that is simply missing reads as "this feature does not exist".
  */
 function SetupSection({ c }: { c: ClientW }) {
   const { m } = useOps();
-  const s = c.setup!;
+  if (!c.setup) {
+    return (
+      <Section className="[grid-column:1/-1]">
+        <h2 className="m-0 mb-2 text-[15px]">Setup</h2>
+        <p className="m-0 text-[13px] text-mute">
+          No setup sheet from WabMeta yet. Fill it in and save it on this client&apos;s page in the WabMeta admin; the next sync brings it here.
+        </p>
+      </Section>
+    );
+  }
+  const s = c.setup;
   const fin = m.finIds.has(c.id);
   const total = s.items.reduce((a, i) => a + (i.chargePaise ?? 0), 0);
   const money = (p: number | null) => (p === null ? "NIL" : `₹${(p / 100).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`);
@@ -256,7 +269,7 @@ function SetupSection({ c }: { c: ClientW }) {
           </table>
         </div>
       ) : (
-        <p className="m-0 text-[13px] text-mute">No setup lines yet.</p>
+        <p className="m-0 text-[13px] text-mute">Nothing filled in yet on the WabMeta setup sheet.</p>
       )}
       <p className="m-0 mt-2.5 text-xs text-mute">
         From the onboarder&apos;s setup sheet in WabMeta. Change it there; the next sync brings it here.
