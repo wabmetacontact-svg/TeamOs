@@ -1,6 +1,7 @@
 import "server-only";
 import type {
   AdSpend,
+  Target,
   AuditEntry,
   Brand,
   Client,
@@ -38,6 +39,7 @@ import { nowIn, todayIn } from "./format";
 import { occurrencesThrough, type Rule } from "./recurrence";
 import type {
   AdSpendW,
+  TargetW,
   AuditW,
   BrandW,
   ClientW,
@@ -124,6 +126,17 @@ export const mapAdSpend = (a: AdSpend): AdSpendW => ({
   note: a.note,
   ledgerEntryId: a.ledgerEntryId,
   byId: a.createdById,
+});
+
+export const mapTarget = (t: Target): TargetW => ({
+  id: t.id,
+  memberId: t.memberId,
+  month: dateOnly(t.month)!.slice(0, 7),
+  sales: t.sales,
+  amount: rupeesOrNull(t.amount),
+  dailySales: t.dailySales,
+  dailyAmount: rupeesOrNull(t.dailyAmount),
+  byId: t.createdById,
 });
 
 export const mapCommissionRule = (r: CommissionRule): CommissionRuleW => ({
@@ -437,6 +450,7 @@ export function auditVisible(r: Reach, a: Pick<AuditEntry, "clientId" | "area">)
   if (a.area === "payroll") return r.payroll;
   if (a.area === "ledger") return canOverhead(r.viewer);
   if (a.area === "tasks") return canSee(r.viewer, "tasks");
+  if (a.area === "targets") return canSee(r.viewer, "targets");
   return false;
 }
 
@@ -459,7 +473,7 @@ export async function loadWorkspace(signed: Signed): Promise<Workspace> {
   const viewer = asPerson(viewerRow);
   const r = reachOf(viewer, grantMap(grantRows));
 
-  const [members, salaries, brands, clients, rates, ledger, depts, tasks, series, cols, leaves, holidays, audit, commissionRates, commissionRules, adSpends] =
+  const [members, salaries, brands, clients, rates, ledger, depts, tasks, series, cols, leaves, holidays, audit, commissionRates, commissionRules, adSpends, targets] =
     await Promise.all([
       db.member.findMany({ orderBy: [{ isOwner: "desc" }, { createdAt: "asc" }] }),
       r.payroll ? db.salaryChange.findMany() : Promise.resolve([]),
@@ -480,6 +494,7 @@ export async function loadWorkspace(signed: Signed): Promise<Workspace> {
       // Only for people given the Ads section. Spend is money, so a person
       // without it does not get the figures in their browser at all.
       canSee(viewer, "ads") ? db.adSpend.findMany({ orderBy: { createdAt: "asc" } }) : Promise.resolve([]),
+      canSee(viewer, "targets") ? db.target.findMany({ orderBy: { createdAt: "asc" } }) : Promise.resolve([]),
     ]);
 
   const ctx: MapCtx = { tz, payroll: r.payroll, finance: r.financeClient };
@@ -508,5 +523,6 @@ export async function loadWorkspace(signed: Signed): Promise<Workspace> {
     commissionRates: commissionRates.map(mapCommissionRate),
     commissionRules: commissionRules.map(mapCommissionRule),
     adSpends: adSpends.map(mapAdSpend),
+    targets: targets.map(mapTarget),
   };
 }

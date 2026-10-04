@@ -179,6 +179,7 @@ async function main() {
   await page("/tasks", ownerCookie, "tasks", ["October content calendar", "Fix tracking pixel", "Recurring", monthLabel, "All time", "Calendar"]);
   await page("/team", ownerCookie, "team", ["Rahul Writer", "Headcount", "Leave requests", "Sales"]);
   await page("/ads", ownerCookie, "ads", ["New clients", "Spent on ads"]);
+  await page("/targets", ownerCookie, "targets", ["Whole team", "Amount received", "Needed per day"]);
   await page("/expenses", ownerCookie, "income and expenses", ["Acme retainer", "Office rent", "Pending", "The Net above, opened up"]);
   await page("/access", ownerCookie, "access", ["Rahul Writer", "Apply preset", "Dashboard figures"]);
   await page("/audit", ownerCookie, "audit trail", ["added client"]);

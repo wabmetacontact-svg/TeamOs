@@ -33,6 +33,11 @@ export function IconSprite() {
       <symbol id="i-megaphone" viewBox="0 0 24 24" {...stroke}>
         <path d="M3 10v4h3l7 4V6L6 10zM16.5 8.5a5 5 0 010 7M6 14l1.5 5h3L9 14.9" />
       </symbol>
+      <symbol id="i-target" viewBox="0 0 24 24" {...stroke}>
+        <circle cx="12" cy="12" r="9" />
+        <circle cx="12" cy="12" r="5" />
+        <circle cx="12" cy="12" r="1" />
+      </symbol>
       <symbol id="i-check" viewBox="0 0 24 24" {...stroke}>
         <rect x="3" y="3" width="18" height="18" rx="4" />
         <path d="M8 12.5l2.5 2.5L16 9.5" />
@@ -66,6 +71,7 @@ export function IconSprite() {
 export type IconName =
   | "grid"
   | "megaphone"
+  | "target"
   | "database"
   | "users"
   | "network"
