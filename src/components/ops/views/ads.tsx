@@ -36,11 +36,13 @@ export function Ads() {
     [w, ym],
   );
 
-  if (!m.overhead) {
-    return <LockNotice>Ad spend is company money with no client, so it needs Expenses edit access, set on the Access screen.</LockNotice>;
+  // The shell already refuses a viewer with no Ads access; this covers the
+  // component being used anywhere else.
+  if (!m.sees("ads")) {
+    return <LockNotice>You don&apos;t have access to Ads. It is set on the Access screen.</LockNotice>;
   }
 
-  const canEdit = m.edits("expenses") && !m.previewing;
+  const canEdit = m.edits("ads") && !m.previewing;
   const spend = rows.reduce((a, r) => a + r.spendPaise, 0);
   const leads = rows.reduce((a, r) => a + r.leads, 0);
   const sales = rows.reduce((a, r) => a + r.sales, 0);

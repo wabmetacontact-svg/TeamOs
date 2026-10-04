@@ -30,6 +30,9 @@ export function IconSprite() {
       <symbol id="i-doc" viewBox="0 0 24 24" {...stroke}>
         <path d="M5 3h14v18l-2.5-1.5L14 21l-2-1.5L10 21l-2.5-1.5L5 21zM9 8h6M9 12h6M9 16h3" />
       </symbol>
+      <symbol id="i-megaphone" viewBox="0 0 24 24" {...stroke}>
+        <path d="M3 10v4h3l7 4V6L6 10zM16.5 8.5a5 5 0 010 7M6 14l1.5 5h3L9 14.9" />
+      </symbol>
       <symbol id="i-check" viewBox="0 0 24 24" {...stroke}>
         <rect x="3" y="3" width="18" height="18" rx="4" />
         <path d="M8 12.5l2.5 2.5L16 9.5" />
@@ -62,6 +65,7 @@ export function IconSprite() {
 
 export type IconName =
   | "grid"
+  | "megaphone"
   | "database"
   | "users"
   | "network"

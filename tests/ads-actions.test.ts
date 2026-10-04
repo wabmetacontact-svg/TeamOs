@@ -102,7 +102,7 @@ describe("who sees it", () => {
     expect(w.adSpends.some((s) => s.memberId === nehaId && s.leads === 12)).toBe(true);
   });
 
-  test("somebody without Expenses edit neither sees nor records it", async () => {
+  test("somebody without the Ads section neither sees nor records it", async () => {
     const me = await owner.member.findUniqueOrThrow({ where: { id: meId } });
     await owner.member.update({ where: { id: nehaId }, data: { passwordHash: me.passwordHash } });
     const session = await owner.session.create({ data: { tenantId, memberId: nehaId, expiresAt: new Date(Date.now() + 864e5) } });
@@ -114,6 +114,23 @@ describe("who sees it", () => {
       const r = await addAdSpend({ memberId: nehaId, month: ym, amount: "100", leads: "1" });
       expect(r.ok).toBe(false);
       if (!r.ok) expect(r.error).not.toMatch(/session has ended/);
+    } finally {
+      if (mine) jar.set(SESSION_COOKIE, mine);
+    }
+  });
+
+  test("Ads view shows the figures without Expenses, and still cannot record", async () => {
+    // The section is its own grant now: somebody can be shown how ads are doing
+    // without being handed the whole ledger.
+    await owner.member.update({ where: { id: nehaId }, data: { features: { ads: "view" } } });
+    const session = await owner.session.create({ data: { tenantId, memberId: nehaId, expiresAt: new Date(Date.now() + 864e5) } });
+    const mine = jar.get(SESSION_COOKIE);
+    jar.set(SESSION_COOKIE, await signSession({ sid: session.id, uid: nehaId, tid: tenantId }, 3600));
+    try {
+      const w = await loadWorkspace((await getSigned())!);
+      expect(w.adSpends.some((s) => s.leads === 12)).toBe(true);
+      const r = await addAdSpend({ memberId: nehaId, month: ym, amount: "100", leads: "1" });
+      expect(r.ok).toBe(false);
     } finally {
       if (mine) jar.set(SESSION_COOKIE, mine);
     }
