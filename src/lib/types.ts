@@ -98,6 +98,23 @@ export type ClientW = {
   details: string;
   /** Whether a password is stored. The password itself is never in the workspace. */
   hasPassword: boolean;
+  /** The onboarder's setup sheet from WabMeta, or null if there is none. */
+  setup: ClientSetupW | null;
+};
+
+export type ClientSetupW = {
+  businessType: string | null;
+  doneOn: string | null;
+  items: {
+    label: string;
+    /** Paise; null is "NIL". */
+    chargePaise: number | null;
+    chargeNote: string;
+    details: string;
+    status: string;
+    /** The password stays in WabMeta; this only says there is one. */
+    hasPassword: boolean;
+  }[];
 };
 
 /** id is "memberId:clientId". */

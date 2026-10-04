@@ -389,6 +389,42 @@ describe("the client's account from WabMeta", () => {
     expect(row.plan).toBe("Pro");
   });
 
+  const sheet = {
+    businessType: "Affiliate Marketing",
+    doneOn: "2026-09-12",
+    items: [
+      { label: "Plan/Email", chargePaise: 89900, chargeNote: "899 (B)", details: "eswaranedits@gmail.com", status: "Approved", hasPassword: true },
+      { label: "Phone no.", chargePaise: 130000, chargeNote: "700+600", details: "+447365177365", status: "", hasPassword: false },
+    ],
+  };
+
+  test("the setup sheet arrives with the client", async () => {
+    const [r] = await applyEvents(tenantId, [client({ externalId: ACC, name: "Account Co Renamed", plan: "Starter", setup: sheet })]);
+    expect(r).toMatchObject({ status: "applied" });
+    const row = await owner.client.findFirstOrThrow({ where: { tenantId, externalId: ACC } });
+    expect(row.setup).toMatchObject({ businessType: "Affiliate Marketing", items: [{ label: "Plan/Email", hasPassword: true }, { label: "Phone no." }] });
+  });
+
+  test("the same sheet again is unchanged, though Postgres reorders its keys", async () => {
+    const [r] = await applyEvents(tenantId, [client({ externalId: ACC, name: "Account Co Renamed", plan: "Starter", setup: sheet })]);
+    expect(r).toMatchObject({ status: "unchanged" });
+  });
+
+  test("a password sent by mistake is never stored", async () => {
+    // Not in the contract, so zod drops it before anything is written.
+    const leaky = { ...sheet, items: [{ ...sheet.items[0]!, password: "Muthu@105269" }] };
+    await applyEvents(tenantId, [client({ externalId: ACC, name: "Account Co Renamed", plan: "Starter", setup: leaky })]);
+    const row = await owner.client.findFirstOrThrow({ where: { tenantId, externalId: ACC } });
+    expect(JSON.stringify(row.setup)).not.toContain("Muthu@105269");
+    await applyEvents(tenantId, [client({ externalId: ACC, name: "Account Co Renamed", plan: "Starter", setup: sheet })]);
+  });
+
+  test("a sender that sends no sheet leaves the stored one alone", async () => {
+    await applyEvents(tenantId, [client({ externalId: ACC, name: "Account Co Renamed", plan: "Starter" })]);
+    const row = await owner.client.findFirstOrThrow({ where: { tenantId, externalId: ACC } });
+    expect(row.setup).toMatchObject({ businessType: "Affiliate Marketing" });
+  });
+
   test("and never touches the notes or the password, which are TeamOS's own", async () => {
     await owner.client.updateMany({ where: { tenantId, externalId: ACC }, data: { details: "kept", passwordEnc: "v1:x:y:z" } });
     await applyEvents(tenantId, [client({ externalId: ACC, name: "Account Co Renamed", plan: "Starter" })]);

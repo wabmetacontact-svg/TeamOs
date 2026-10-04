@@ -212,6 +212,7 @@ export function mapClient(c: Client, ctx: MapCtx, rates: ClientRate[] = []): Cli
     // Only that it exists. passwordEnc is deliberately not mapped: this object
     // is sent to the browser on every page load.
     hasPassword: c.passwordEnc !== null,
+    setup: (c.setup as ClientW["setup"]) ?? null,
     rates: fin
       ? rates
           .filter((r) => r.clientId === c.id)

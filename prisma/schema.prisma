@@ -369,6 +369,10 @@ model Client {
   /// workspace, and decrypted only on an owner's request, which is audited.
   passwordEnc   String?
   passwordSetAt DateTime?
+  /// The onboarder's setup sheet, mirrored from WabMeta: business type, when
+  /// setup finished, and one line per thing set up. Never holds a password -
+  /// only whether a line has one in WabMeta.
+  setup         Json?
 
   rates  ClientRate[]
   grants ClientGrant[]
