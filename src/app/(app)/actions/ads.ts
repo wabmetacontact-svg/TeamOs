@@ -12,8 +12,8 @@ import { ID, memberOf, outEntries, parse, rs } from "@/lib/action-helpers";
  *
  * The money goes into the ledger as an expense in the same transaction, and
  * comes out with it, so there is still one place money lives and the month's
- * profit already counts what was spent on ads. Needs Expenses edit, the same
- * as writing any other overhead expense.
+ * profit already counts what was spent on ads. Needs Ads edit; the expense it
+ * writes then shows to whoever can see overhead money, like a salary does.
  */
 
 const CATEGORY = "Ads";
@@ -28,7 +28,7 @@ const form = z.object({
 
 export async function addAdSpend(raw: z.input<typeof form>): Promise<Result> {
   return mutate(async (ctx) => {
-    ctx.need("expenses", "edit");
+    ctx.need("ads", "edit");
     const f = parse(ctx, form, raw);
     const m = await memberOf(ctx, f.memberId, "memberId");
 
@@ -89,7 +89,7 @@ export async function addAdSpend(raw: z.input<typeof form>): Promise<Result> {
 /** Removes an ad spend and the expense it wrote, together. */
 export async function removeAdSpend(id: string): Promise<Result> {
   return mutate(async (ctx) => {
-    ctx.need("expenses", "edit");
+    ctx.need("ads", "edit");
     const row = await ctx.tx.adSpend.findFirst({ where: { id }, include: { member: true } });
     if (!row) ctx.fail("That ad spend no longer exists.");
     if (row!.ledgerEntryId) {

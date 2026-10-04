@@ -477,8 +477,9 @@ export async function loadWorkspace(signed: Signed): Promise<Workspace> {
       // What somebody is paid is Payroll's business, like their salary.
       r.payroll ? db.commissionRate.findMany({ orderBy: { effectiveFrom: "asc" } }) : Promise.resolve([]),
       r.payroll ? db.commissionRule.findMany({ orderBy: { createdAt: "asc" } }) : Promise.resolve([]),
-      // Ad spend is overhead money - no client - so it follows the overhead rule.
-      canOverhead(viewer) ? db.adSpend.findMany({ orderBy: { createdAt: "asc" } }) : Promise.resolve([]),
+      // Only for people given the Ads section. Spend is money, so a person
+      // without it does not get the figures in their browser at all.
+      canSee(viewer, "ads") ? db.adSpend.findMany({ orderBy: { createdAt: "asc" } }) : Promise.resolve([]),
     ]);
 
   const ctx: MapCtx = { tz, payroll: r.payroll, finance: r.financeClient };
