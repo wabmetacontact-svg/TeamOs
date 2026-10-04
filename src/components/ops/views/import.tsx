@@ -2,8 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { IMP, IMPORT_TYPES, MAX_IMPORT_ROWS, autoMap, checkRows, parseCSV, type ImportType } from "@/lib/importer";
-import { runImport } from "@/app/(app)/actions/imports";
+import { IMP, IMPORT_TYPES, MAX_IMPORT_ROWS, adKey, autoMap, checkRows, ledgerKey, parseCSV, type ImportType } from "@/lib/importer";
+import { readSheetLink, runImport } from "@/app/(app)/actions/imports";
 import { Icon } from "../icons";
 import { useOps } from "../store";
 
@@ -16,6 +16,8 @@ type State = {
   text: string;
   url: string;
   fileName: string;
+  /** The tabs of an Excel file with more than one, to pick from. */
+  sheets: { name: string; rows: string[][] }[];
   headers: string[];
   rows: string[][];
   map: Record<string, string>;
@@ -34,6 +36,7 @@ const START: State = {
   text: "",
   url: "",
   fileName: "",
+  sheets: [],
   headers: [],
   rows: [],
   map: {},
@@ -58,34 +61,48 @@ export function ImportView() {
   const canImport = m.edits("import") && !m.previewing;
 
   function load(txt: string, name: string) {
-    const rows = parseCSV(txt);
+    loadRows(parseCSV(txt), name);
+  }
+
+  function loadRows(rows: string[][], name: string) {
     if (rows.length < 2) return set({ err: "No data rows found. Include the header row and at least one row of data." });
     if (rows.length - 1 > MAX_IMPORT_ROWS) return set({ err: `That is ${rows.length - 1} rows. Import at most ${MAX_IMPORT_ROWS} at a time.` });
     const headers = rows[0]!.map((x, i) => x || `Column ${i + 1}`);
-    set({ headers, rows: rows.slice(1), map: autoMap(s.type!, headers), fileName: name, step: 3, err: "" });
+    set({ headers, rows: rows.slice(1), map: autoMap(s.type!, headers), fileName: name, sheets: [], step: 3, err: "" });
   }
 
   async function fetchSheet() {
     const u = s.url.trim();
-    const id = u.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-    if (!id) return set({ err: "Paste a Google Sheets link, the one from your browser address bar." });
-    const gid = u.match(/[#&?]gid=(\d+)/)?.[1];
+    if (!/\/spreadsheets\/d\//.test(u)) return set({ err: "Paste a Google Sheets link, the one from your browser address bar." });
+    set({ busy: true, err: "" });
+    // Read on the server: Google does not answer a browser on another site.
+    const r = await readSheetLink({ url: u });
+    if (!r.ok) return set({ busy: false, err: r.error });
+    set({ busy: false });
+    load(r.data!.text, "Google Sheet");
+  }
+
+  async function readExcel(file: File) {
     set({ busy: true, err: "" });
     try {
-      const r = await fetch(`https://docs.google.com/spreadsheets/d/${id[1]}/export?format=csv${gid ? `&gid=${gid}` : ""}`);
-      if (!r.ok) throw new Error();
-      const t = await r.text();
-      if (/^\s*</.test(t)) throw new Error();
+      // Loaded only when an Excel file is chosen; most imports never need it.
+      const { default: readXlsxFile } = await import("read-excel-file/browser");
+      const sheets = (await readXlsxFile(file))
+        .map((sh) => ({ name: sh.sheet, rows: sh.data.map((row) => row.map(cellText)).filter((row) => row.some((c) => c !== "")) }))
+        .filter((sh) => sh.rows.length > 1);
       set({ busy: false });
-      load(t, "Google Sheet");
+      if (!sheets.length) return set({ err: "That file has no sheet with a header row and data under it." });
+      if (sheets.length === 1) return loadRows(sheets[0]!.rows, file.name);
+      set({ sheets, fileName: file.name });
     } catch {
-      set({ busy: false, err: "Couldn't read that sheet. Share it as Anyone with the link can view, or download it as CSV and upload the file." });
+      set({ busy: false, err: "Couldn't read that Excel file. Save it again as .xlsx, or as CSV, and upload that." });
     }
   }
 
   function readFile(file: File | undefined) {
     if (!file) return;
-    if (/\.xlsx?$/i.test(file.name)) return set({ err: "Excel files are not supported yet. In Google Sheets or Excel, save the tab as CSV and upload that." });
+    if (/\.xlsx$/i.test(file.name)) return void readExcel(file);
+    if (/\.xls$/i.test(file.name)) return set({ err: "That is an old Excel file (.xls). Open it and save it as .xlsx or CSV, then upload that." });
     const r = new FileReader();
     r.onload = () => load(String(r.result ?? ""), file.name);
     r.readAsText(file);
@@ -111,9 +128,17 @@ export function ImportView() {
             team: m.team.map((p) => ({ id: p.id, name: p.name, email: p.email })),
             clients: m.vis.map((c) => ({ id: c.id, name: c.name, company: c.company, brandId: c.brandId })),
             brands: w.brands.map((b) => ({ id: b.id, name: b.name })),
+            ledgerKeys:
+              s.type === "ledger"
+                ? new Set(w.ledger.map((e) => ledgerKey({ type: e.type, date: e.date, paise: Math.round(e.amount * 100), clientId: e.clientId, desc: e.desc })))
+                : undefined,
+            adKeys:
+              s.type === "ads"
+                ? new Set(w.adSpends.map((a) => adKey({ memberId: a.memberId, month: a.month, paise: Math.round(a.amount * 100), leads: a.leads })))
+                : undefined,
           })
         : [],
-    [s, m, w.brands],
+    [s, m, w.brands, w.ledger, w.adSpends],
   );
   const ok = checked.filter((r) => r.ok).length;
   const bad = checked.length - ok;
@@ -144,8 +169,8 @@ export function ImportView() {
   return (
     <>
       <p className="m-0 mb-4 max-w-[72ch] text-[13px] leading-[1.55] text-mute2">
-        Bring in data from your Google Sheets. Upload a CSV export, paste rows copied from the sheet, or read a shared sheet link. You review every row before
-        anything is saved.
+        Bring in your earlier data from Google Sheets or Excel: upload an Excel or CSV file, paste rows copied from the sheet, or read a shared sheet link.
+        You review every row before anything is saved, and rows already here are skipped.
       </p>
       <div className="mb-4 flex flex-wrap gap-2">
         {steps.map((label, i) => {
@@ -214,7 +239,7 @@ export function ImportView() {
             <div className="grid max-w-[520px] grid-cols-3 gap-1 rounded-[10px] bg-tint2 p-1">
               {(
                 [
-                  ["file", "Upload CSV"],
+                  ["file", "Upload file"],
                   ["paste", "Paste from sheet"],
                   ["link", "Google Sheet link"],
                 ] as const
@@ -245,11 +270,11 @@ export function ImportView() {
                 style={{ ["--icon-stroke" as string]: "#5B5BD6" }}
               >
                 <Icon name="doc" size={28} />
-                <span className="fw-s text-sm">Drop a CSV file here, or click to choose</span>
-                <span className="text-xs text-mute">In Google Sheets: File, Download, Comma-separated values (.csv)</span>
+                <span className="fw-s text-sm">{s.busy ? "Reading…" : "Drop an Excel or CSV file here, or click to choose"}</span>
+                <span className="text-xs text-mute">.xlsx from Excel, or from Google Sheets: File, Download, Microsoft Excel or CSV</span>
                 <input
                   type="file"
-                  accept=".csv,.tsv,.txt,text/csv"
+                  accept=".xlsx,.csv,.tsv,.txt,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                   className="hidden"
                   onChange={(e) => {
                     readFile(e.target.files?.[0]);
@@ -257,6 +282,18 @@ export function ImportView() {
                   }}
                 />
               </label>
+            )}
+            {s.src === "file" && s.sheets.length > 1 && (
+              <div className="flex flex-col gap-2">
+                <span className="fw-s text-[13px]">{s.fileName} has {s.sheets.length} sheets. Which one?</span>
+                <div className="flex flex-wrap gap-2">
+                  {s.sheets.map((sh) => (
+                    <button key={sh.name} type="button" className={secondary} onClick={() => loadRows(sh.rows, `${s.fileName} · ${sh.name}`)}>
+                      {sh.name} <span className="text-mute">· {sh.rows.length - 1} rows</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
             {s.src === "paste" && (
               <>
@@ -335,12 +372,20 @@ export function ImportView() {
                 );
               })}
             </div>
-            {(s.type === "tasks" || s.type === "ledger") && (
+            {(s.type === "tasks" || s.type === "ledger" || s.type === "clients") && (
               <div className="flex flex-col gap-2">
-                <label className="flex cursor-pointer items-center gap-2.5 text-[13px] text-ink3">
-                  <input type="checkbox" checked={s.mkClients} onChange={() => set({ mkClients: !s.mkClients })} className="m-0 size-[18px] accent-accent" />
-                  Create clients that are not in the platform yet
-                </label>
+                {s.type !== "clients" && (
+                  <label className="flex cursor-pointer items-center gap-2.5 text-[13px] text-ink3">
+                    <input type="checkbox" checked={s.mkClients} onChange={() => set({ mkClients: !s.mkClients })} className="m-0 size-[18px] accent-accent" />
+                    Create clients that are not in the platform yet
+                  </label>
+                )}
+                {s.type === "clients" && (
+                  <label className="flex cursor-pointer items-center gap-2.5 text-[13px] text-ink3">
+                    <input type="checkbox" checked={s.mkMembers} onChange={() => set({ mkMembers: !s.mkMembers })} className="m-0 size-[18px] accent-accent" />
+                    Add sales people and onboarders who are not on the team yet
+                  </label>
+                )}
                 {s.type === "tasks" && (
                   <label className="flex cursor-pointer items-center gap-2.5 text-[13px] text-ink3">
                     <input type="checkbox" checked={s.mkMembers} onChange={() => set({ mkMembers: !s.mkMembers })} className="m-0 size-[18px] accent-accent" />
@@ -465,4 +510,11 @@ export function ImportView() {
       </section>
     </>
   );
+}
+
+/** A spreadsheet cell as the text a CSV would have had. Dates become yyyy-MM-dd. */
+function cellText(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? "" : v.toISOString().slice(0, 10);
+  return String(v).trim();
 }
