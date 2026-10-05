@@ -340,7 +340,19 @@ export async function runImport(raw: z.input<typeof input>): Promise<Result<Impo
           exp.add("Ads");
         }
         await tx.adSpend.create({
-          data: { tenantId: T, memberId: who.id, month: toDate(`${r.month}-01`), amount: toPaise(r.amount), leads: r.leads, note: r.note, ledgerEntryId, createdById: ctx.me.id },
+          data: {
+            tenantId: T,
+            memberId: who.id,
+            month: toDate(`${r.month}-01`),
+            period: "month",
+            fromDate: toDate(`${r.month}-01`),
+            toDate: toDate(`${r.month}-${String(daysInMonth(r.month)).padStart(2, "0")}`),
+            amount: toPaise(r.amount),
+            leads: r.leads,
+            note: r.note,
+            ledgerEntryId,
+            createdById: ctx.me.id,
+          },
         });
         imported++;
       }

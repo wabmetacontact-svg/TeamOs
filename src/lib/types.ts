@@ -232,12 +232,18 @@ export type CommissionRuleW = {
   byId: string;
 };
 
-/** Ads run for a person in a month. Sent only to whoever can see overhead money. */
+export type AdPeriod = "day" | "week" | "month";
+
+/** Ads run for a person for a day, a week or a month. Sent only to whoever can see overhead money. */
 export type AdSpendW = {
   id: string;
   memberId: string;
   /** yyyy-MM */
   month: string;
+  period: AdPeriod;
+  /** yyyy-MM-dd, both ends included. */
+  from: string;
+  to: string;
   /** Rupees. */
   amount: number;
   leads: number;
