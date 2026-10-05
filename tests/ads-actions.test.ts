@@ -60,7 +60,7 @@ describe("recording ads", () => {
   let spendId = "";
 
   test("writes the spend and an expense under Ads, together", async () => {
-    const r = await addAdSpend({ memberId: nehaId, month: ym, amount: "15000", leads: "60", note: "Meta - Diwali" });
+    const r = await addAdSpend({ memberId: nehaId, period: "month", date: `${ym}-01`, amount: "15000", leads: "60", note: "Meta - Diwali" });
     expect(r.ok).toBe(true);
     const row = await owner.adSpend.findFirstOrThrow({ where: { tenantId, memberId: nehaId } });
     spendId = row.id;
@@ -74,7 +74,7 @@ describe("recording ads", () => {
   });
 
   test("leads that cost nothing are recorded without an expense", async () => {
-    const r = await addAdSpend({ memberId: nehaId, month: ym, amount: "", leads: "12", note: "Referrals" });
+    const r = await addAdSpend({ memberId: nehaId, period: "month", date: `${ym}-01`, amount: "", leads: "12", note: "Referrals" });
     expect(r.ok).toBe(true);
     const row = await owner.adSpend.findFirstOrThrow({ where: { tenantId, memberId: nehaId, leads: 12 } });
     expect(row.amount).toBe(0n);
@@ -82,9 +82,9 @@ describe("recording ads", () => {
   });
 
   test("refuses an entry with neither spend nor leads, or a negative one", async () => {
-    expect((await addAdSpend({ memberId: nehaId, month: ym, amount: "", leads: "" })).ok).toBe(false);
-    expect((await addAdSpend({ memberId: nehaId, month: ym, amount: "-5", leads: "1" })).ok).toBe(false);
-    expect((await addAdSpend({ memberId: nehaId, month: ym, amount: "10", leads: "1.5" })).ok).toBe(false);
+    expect((await addAdSpend({ memberId: nehaId, period: "month", date: `${ym}-01`, amount: "", leads: "" })).ok).toBe(false);
+    expect((await addAdSpend({ memberId: nehaId, period: "month", date: `${ym}-01`, amount: "-5", leads: "1" })).ok).toBe(false);
+    expect((await addAdSpend({ memberId: nehaId, period: "month", date: `${ym}-01`, amount: "10", leads: "1.5" })).ok).toBe(false);
   });
 
   test("removing it removes its expense too", async () => {
@@ -93,6 +93,36 @@ describe("recording ads", () => {
     expect(r.ok).toBe(true);
     expect(await owner.adSpend.count({ where: { id: spendId } })).toBe(0);
     expect(await owner.ledgerEntry.count({ where: { id: row.ledgerEntryId! } })).toBe(0);
+  });
+});
+
+describe("a day or a week", () => {
+  test("a week runs Monday to Sunday, from any day in it, and its expense is dated on the Monday", async () => {
+    // 7 Oct 2026 is a Wednesday.
+    const r = await addAdSpend({ memberId: nehaId, period: "week", date: "2026-10-07", amount: "7000", leads: "70", note: "Week test" });
+    expect(r.ok).toBe(true);
+    const row = await owner.adSpend.findFirstOrThrow({ where: { tenantId, note: "Week test" } });
+    expect(row.period).toBe("week");
+    expect(row.fromDate.toISOString().slice(0, 10)).toBe("2026-10-05");
+    expect(row.toDate.toISOString().slice(0, 10)).toBe("2026-10-11");
+    const entry = await owner.ledgerEntry.findUniqueOrThrow({ where: { id: row.ledgerEntryId! } });
+    expect(entry.date.toISOString().slice(0, 10)).toBe("2026-10-05");
+    expect(entry.description).toContain("Week of 5 Oct 2026");
+  });
+
+  test("a day is that day", async () => {
+    const r = await addAdSpend({ memberId: nehaId, period: "day", date: "2026-10-09", amount: "500", leads: "4", note: "Day test" });
+    expect(r.ok).toBe(true);
+    const row = await owner.adSpend.findFirstOrThrow({ where: { tenantId, note: "Day test" } });
+    expect(row.fromDate.toISOString().slice(0, 10)).toBe("2026-10-09");
+    expect(row.toDate.toISOString().slice(0, 10)).toBe("2026-10-09");
+  });
+
+  test("a month covers the whole month", async () => {
+    const row = await owner.adSpend.findFirstOrThrow({ where: { tenantId, note: "Referrals" } });
+    expect(row.period).toBe("month");
+    expect(row.fromDate.toISOString().slice(0, 10)).toBe(`${ym}-01`);
+    expect(row.toDate.toISOString().slice(5, 7)).toBe(ym.slice(5, 7));
   });
 });
 
@@ -111,7 +141,7 @@ describe("who sees it", () => {
     try {
       const w = await loadWorkspace((await getSigned())!);
       expect(w.adSpends).toEqual([]);
-      const r = await addAdSpend({ memberId: nehaId, month: ym, amount: "100", leads: "1" });
+      const r = await addAdSpend({ memberId: nehaId, period: "month", date: `${ym}-01`, amount: "100", leads: "1" });
       expect(r.ok).toBe(false);
       if (!r.ok) expect(r.error).not.toMatch(/session has ended/);
     } finally {
@@ -129,7 +159,7 @@ describe("who sees it", () => {
     try {
       const w = await loadWorkspace((await getSigned())!);
       expect(w.adSpends.some((s) => s.leads === 12)).toBe(true);
-      const r = await addAdSpend({ memberId: nehaId, month: ym, amount: "100", leads: "1" });
+      const r = await addAdSpend({ memberId: nehaId, period: "month", date: `${ym}-01`, amount: "100", leads: "1" });
       expect(r.ok).toBe(false);
     } finally {
       if (mine) jar.set(SESSION_COOKIE, mine);

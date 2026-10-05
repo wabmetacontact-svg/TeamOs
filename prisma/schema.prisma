@@ -280,8 +280,14 @@ model AdSpend {
   tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   memberId      String
   member        Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
-  /// The 1st of the month the ads ran in.
+  /// The 1st of the month the ads started in.
   month         DateTime @db.Date
+  /// "day" | "week" | "month": what the entry was recorded for.
+  period        String   @default("month")
+  /// The days the spend covers, both ends included. A week runs Monday to
+  /// Sunday and may cross into the next month.
+  fromDate      DateTime @db.Date
+  toDate        DateTime @db.Date
   /// Paise. Zero is allowed: leads that cost nothing still count as leads.
   amount        BigInt   @default(0)
   leads         Int      @default(0)
