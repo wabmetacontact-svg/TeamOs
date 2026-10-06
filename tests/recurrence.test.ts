@@ -34,3 +34,12 @@ describe("recurring tasks", () => {
     expect(ruleText(rule({ freq: "weekly", weekday: 1, time: "09:30", until: "2026-12-31" }))).toBe("Every Monday at 09:30, until 31 Dec");
   });
 });
+
+describe("deleted days", () => {
+  test("a day whose task was deleted does not occur again", () => {
+    const r: Rule = { freq: "daily", weekday: null, everyDays: 1, time: null, start: "2026-10-01", until: null, skip: ["2026-10-02"] };
+    expect(occurs(r, "2026-10-02")).toBe(false);
+    expect(occurrencesThrough(r, "2026-10-04")).toEqual(["2026-10-01", "2026-10-03", "2026-10-04"]);
+    expect(nextOccurrence(r, "2026-10-02")).toBe("2026-10-03");
+  });
+});

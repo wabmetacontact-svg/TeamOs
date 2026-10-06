@@ -10,7 +10,7 @@ import { ruleText } from "@/lib/recurrence";
 import type { Result, TaskW } from "@/lib/types";
 import { addBrand, createClient } from "@/app/(app)/actions/clients";
 import { addCategory } from "@/app/(app)/actions/ledger";
-import { addArea, addNote, addTaskDept, saveTask, toggleSeries } from "@/app/(app)/actions/tasks";
+import { addArea, addNote, addTaskDept, deleteTask, saveTask, toggleSeries } from "@/app/(app)/actions/tasks";
 import { addHrDept, createLoginLink, createMember, setMemberStatus, setTaskBoards } from "@/app/(app)/actions/team";
 import { Icon } from "./icons";
 import { ADD, FormModal, openModal } from "./modals";
@@ -377,6 +377,7 @@ function TaskBody({ ops, t, back }: { ops: Ops; t: TaskW; back: Drawer | null })
 
 function TaskFoot({ ops, t, back }: { ops: Ops; t: TaskW; back: Drawer | null }) {
   const [saving, setSaving] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const ro = !ops.m.canTask(t) || ops.m.previewing;
   async function save() {
     setSaving(true);
@@ -399,8 +400,45 @@ function TaskFoot({ ops, t, back }: { ops: Ops; t: TaskW; back: Drawer | null })
     setSaving(false);
     if (r.ok) ops.setDrawer(back ?? null);
   }
+  async function remove(scope: "one" | "series") {
+    setSaving(true);
+    const r = await ops.run(deleteTask({ id: t.id, scope }));
+    setSaving(false);
+    if (r.ok) ops.setDrawer(back?.type === "day" ? back : null);
+  }
+
+  if (confirming) {
+    return (
+      <div className="flex flex-wrap items-center gap-2 border-t border-line bg-[#FEF2F2] px-6 py-4">
+        <span className="min-w-[160px] flex-1 text-[13px] text-bad-d">
+          {t.seriesId ? "Delete this task, or stop it repeating and delete every open one?" : "Delete this task, its notes and its history?"}
+        </span>
+        <button type="button" disabled={saving} onClick={() => setConfirming(false)} className="fw-s h-[38px] rounded-full border border-[rgba(100,116,139,.35)] bg-white px-4 text-[13px]">
+          Keep
+        </button>
+        <button type="button" disabled={saving} onClick={() => remove("one")} className="fw-s h-[38px] rounded-full border-0 bg-[#DC2626] px-4 text-[13px] text-white">
+          {t.seriesId ? "Only this one" : "Delete"}
+        </button>
+        {t.seriesId && (
+          <button type="button" disabled={saving} onClick={() => remove("series")} className="fw-s h-[38px] rounded-full border-0 bg-[#991B1B] px-4 text-[13px] text-white">
+            All open, stop repeating
+          </button>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-center gap-2 border-t border-line px-6 py-4">
+      {!ro && (
+        <button
+          type="button"
+          onClick={() => setConfirming(true)}
+          className="fw-s h-[42px] rounded-full border border-[#FCA5A5] bg-white px-4 text-[13px] text-[#DC2626]"
+        >
+          Delete
+        </button>
+      )}
       <span className="flex-1 text-xs text-mute">{saving ? "Writing to the database" : "Saved only after the database confirms."}</span>
       <button type="button" onClick={() => ops.setDrawer(null)} className="fw-s h-[42px] rounded-full border border-[rgba(100,116,139,.35)] bg-white px-[18px] text-[13px]">
         Cancel

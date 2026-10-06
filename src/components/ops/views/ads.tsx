@@ -53,6 +53,7 @@ export function Ads() {
   const [period, setPeriod] = useState<Period>("month");
   const [day, setDay] = useState(m.today);
   const [adding, setAdding] = useState(false);
+  const [confirming, setConfirming] = useState<string | null>(null);
   const { from, to } = periodRange(period, day);
 
   const rows = useMemo(
@@ -179,16 +180,29 @@ export function Ads() {
                   {s.leads} lead{s.leads === 1 ? "" : "s"}
                 </span>
                 <span className="flex-1 text-mute">{s.note}</span>
-                {canEdit && (
-                  <button
-                    type="button"
-                    aria-label="Remove ad spend"
-                    className="size-[28px] rounded-md border border-line2 bg-white text-[15px] leading-none text-mute"
-                    onClick={() => ops.run(removeAdSpend(s.id))}
-                  >
-                    ×
-                  </button>
-                )}
+                {canEdit &&
+                  (confirming === s.id ? (
+                    <span className="flex items-center gap-1.5">
+                      <span className="text-xs text-bad-d">Delete, with its expense?</span>
+                      <button type="button" className={btn} onClick={() => setConfirming(null)}>
+                        Keep
+                      </button>
+                      <button
+                        type="button"
+                        className="fw-s h-8 rounded-lg border-0 bg-[#DC2626] px-3 text-xs text-white"
+                        onClick={async () => {
+                          await ops.run(removeAdSpend(s.id));
+                          setConfirming(null);
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </span>
+                  ) : (
+                    <button type="button" className="fw-s h-8 rounded-lg border border-[#FCA5A5] bg-white px-3 text-xs text-[#DC2626]" onClick={() => setConfirming(s.id)}>
+                      Delete
+                    </button>
+                  ))}
               </div>
             ))}
           </div>

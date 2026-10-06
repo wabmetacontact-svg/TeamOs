@@ -35,7 +35,8 @@ vi.mock("next/navigation", () => ({
 
 const { signup, login } = await import("../src/app/(auth)/actions");
 const { createClient, addBrand, setGrant } = await import("../src/app/(app)/actions/clients");
-const { createTask, addNote } = await import("../src/app/(app)/actions/tasks");
+const { createTask, addNote, deleteTask } = await import("../src/app/(app)/actions/tasks");
+const { loadWorkspace } = await import("../src/lib/workspace");
 const { createEntry } = await import("../src/app/(app)/actions/ledger");
 const { createMember, removeMember, setMemberPassword } = await import("../src/app/(app)/actions/team");
 const { setFeature } = await import("../src/app/(app)/actions/access");
@@ -167,6 +168,49 @@ describe("changing things", () => {
 
 let memberCookie = "";
 let memberId = "";
+
+describe("deleting tasks", () => {
+  const dept = async () => (await owner.taskDepartment.findFirstOrThrow({ where: { tenantId } })).id;
+  const me = async () => (await getSigned())!.me.id;
+
+  test("a task goes, with its notes and history, and the audit trail says so", async () => {
+    expect((await createTask({ title: "Throwaway", brand: brandId, client: clientId, who: await me(), by: await me(), dept: await dept() })).ok).toBe(true);
+    const t = await owner.task.findFirstOrThrow({ where: { tenantId, title: "Throwaway" } });
+    const r = await deleteTask({ id: t.id });
+    expect(r.ok).toBe(true);
+    expect(r.ok && r.patch?.remove?.tasks).toEqual([t.id]);
+    expect(await owner.task.count({ where: { id: t.id } })).toBe(0);
+    expect(await owner.taskStatusChange.count({ where: { taskId: t.id } })).toBe(0);
+    expect(await owner.auditEntry.count({ where: { tenantId, text: "deleted the task “Throwaway”" } })).toBe(1);
+  });
+
+  test("one day of a repeating task is deleted and not made again", async () => {
+    const start = new Date(Date.now() - 3 * 864e5).toISOString().slice(0, 10);
+    const made = await createTask({ title: "Daily check", brand: brandId, client: clientId, who: await me(), by: await me(), dept: await dept(), repeat: "daily", due: start });
+    expect(made.ok).toBe(true);
+    const days = await owner.task.findMany({ where: { tenantId, title: "Daily check" }, orderBy: { due: "asc" } });
+    expect(days.length).toBeGreaterThanOrEqual(3);
+    expect((await deleteTask({ id: days[0]!.id, scope: "one" })).ok).toBe(true);
+    // Loading the workspace makes any missing occurrences - but not this one.
+    await loadWorkspace((await getSigned())!);
+    expect(await owner.task.count({ where: { tenantId, title: "Daily check", due: days[0]!.due } })).toBe(0);
+    expect(await owner.task.count({ where: { tenantId, title: "Daily check" } })).toBe(days.length - 1);
+  });
+
+  test("deleting the series stops it and removes every open task, keeping done ones", async () => {
+    const days = await owner.task.findMany({ where: { tenantId, title: "Daily check" }, orderBy: { due: "asc" } });
+    await owner.task.update({ where: { id: days[0]!.id }, data: { status: "done" } });
+    const seriesId = days[0]!.seriesId!;
+    const r = await deleteTask({ id: days[1]!.id, scope: "series" });
+    expect(r.ok).toBe(true);
+    expect(await owner.taskSeries.count({ where: { id: seriesId } })).toBe(0);
+    const left = await owner.task.findMany({ where: { tenantId, title: "Daily check" } });
+    expect(left.map((x) => x.id)).toEqual([days[0]!.id]);
+    expect(left[0]!.seriesId).toBeNull();
+    await loadWorkspace((await getSigned())!);
+    expect(await owner.task.count({ where: { tenantId, title: "Daily check" } })).toBe(1);
+  });
+});
 
 describe("what someone without the access is told", () => {
 
