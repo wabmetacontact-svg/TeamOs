@@ -642,6 +642,9 @@ model TaskSeries {
   time         String?
   startDate    DateTime        @db.Date
   untilDate    DateTime?       @db.Date
+  /// Days whose task was deleted. Not made again: without this, the next
+  /// load would put a deleted occurrence straight back.
+  skipDates    DateTime[]      @db.Date
   createdAt    DateTime        @default(now())
 
   tasks Task[]

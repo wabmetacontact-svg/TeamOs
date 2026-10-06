@@ -20,10 +20,13 @@ export type Rule = {
   time: string | null;
   start: string;
   until: string | null;
+  /** Days whose task was deleted; they do not occur again. */
+  skip?: string[];
 };
 
 export function occurs(r: Rule, d: string): boolean {
   if (d < r.start || (r.until && d > r.until)) return false;
+  if (r.skip?.includes(d)) return false;
   const wd = weekday(d);
   switch (r.freq) {
     case "daily":

@@ -308,6 +308,7 @@ export function seriesRule(s: TaskSeries): Rule {
     time: s.time,
     start: dateOnly(s.startDate)!,
     until: dateOnly(s.untilDate),
+    skip: (s.skipDates ?? []).map((d) => dateOnly(d)!),
   };
 }
 

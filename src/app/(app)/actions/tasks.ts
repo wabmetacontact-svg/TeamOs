@@ -444,6 +444,7 @@ export async function toggleSeries(id: string): Promise<Result> {
       time: s.time,
       start: dateOnly(s.startDate)!,
       until,
+      skip: s.skipDates.map((d) => dateOnly(d)!),
     });
     await ctx.tx.taskSeries.update({
       where: { id },
@@ -473,6 +474,51 @@ export async function toggleSeries(id: string): Promise<Result> {
     }
     await outSeries(ctx, id);
     return on ? "Recurring task resumed." : "Recurring task stopped. Existing tasks stay.";
+  });
+}
+
+// ───────────────────────────────────────────────────────────── delete ───
+
+/**
+ * Deletes a task, its notes and its history.
+ *
+ * For a task that repeats, `scope` says what goes:
+ *   "one"     this occurrence only. Its day is remembered on the series, or
+ *             the next load would make it again.
+ *   "series"  the repeating itself, and every occurrence not yet done. Done
+ *             ones stay: they are a record of work that happened.
+ */
+export async function deleteTask(raw: { id: string; scope?: "one" | "series" }): Promise<Result> {
+  return mutate(async (ctx) => {
+    ctx.need("tasks");
+    const t = await taskFor(ctx, String(raw?.id ?? ""));
+    const target = await taskTarget(ctx, t);
+    needTaskEdit(ctx, t, target.target);
+
+    if (raw?.scope === "series" && t.seriesId) {
+      const s = await ctx.tx.taskSeries.findFirstOrThrow({ where: { id: t.seriesId } });
+      const may = isTeamAdmin(ctx.person) || s.assigneeId === ctx.me.id || s.createdById === ctx.me.id;
+      if (!may) ctx.fail("Only its assignee, whoever set it up, or a team admin can delete a recurring task.");
+      const open = await ctx.tx.task.findMany({ where: { seriesId: s.id, status: { not: "done" } }, select: { id: true } });
+      const done = await ctx.tx.task.findMany({ where: { seriesId: s.id, status: "done" }, select: { id: true } });
+      await ctx.tx.task.deleteMany({ where: { id: { in: open.map((x) => x.id) } } });
+      // Done occurrences lose their link to the series (onDelete: SetNull) and stay.
+      await ctx.tx.taskSeries.delete({ where: { id: s.id } });
+      ctx.remove("tasks", open.map((x) => x.id));
+      ctx.remove("series", [s.id]);
+      if (done.length) await outTasks(ctx, done.map((x) => x.id));
+      await ctx.log({ kind: "task", text: `deleted the recurring task “${s.title}”`, ...target, from: `${open.length} open`, to: "Deleted" });
+      return open.length === 1 ? "Recurring task deleted." : `Recurring task deleted, with ${open.length} open tasks.`;
+    }
+
+    await ctx.tx.task.delete({ where: { id: t.id } });
+    ctx.remove("tasks", [t.id]);
+    if (t.seriesId && t.due) {
+      await ctx.tx.taskSeries.update({ where: { id: t.seriesId }, data: { skipDates: { push: t.due } } });
+      await outSeries(ctx, t.seriesId);
+    }
+    await ctx.log({ kind: "task", text: `deleted the task “${t.title}”`, ...target, from: statusLabel(t.status), to: "Deleted" });
+    return "Task deleted.";
   });
 }
 
